@@ -1,0 +1,300 @@
+// ── Obidot Indexer — Prisma Schema ───────────────────────
+// 16 models: 4 state, 10 historical, 2 infrastructure
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════
+// STATE TABLES
+// ═══════════════════════════════════════════════════════════
+
+/// Current vault state snapshot (updated on every relevant event)
+model VaultState {
+  id                 String   @id @default("singleton")
+  address            String   @unique
+  totalAssets        String   @default("0") // uint256 as string
+  totalSupply        String   @default("0")
+  totalDeposited     String   @default("0")
+  totalWithdrawn     String   @default("0")
+  depositCap         String   @default("0")
+  maxDailyLoss       String   @default("0")
+  paused             Boolean  @default(false)
+  swapRouter         String?  // address or null if not set
+  pendingWithdrawals Int      @default(0)
+  updatedAtBlock     Int      @default(0)
+  updatedAt          DateTime @updatedAt
+
+  @@map("vault_state")
+}
+
+/// Current oracle price state per asset pair
+model OracleState {
+  id          String   @id @default(cuid())
+  feedAddress String   @unique
+  asset       String   // token symbol or address
+  price       String   // int256 as string (8 decimals for DOT/USD)
+  decimals    Int      @default(8)
+  heartbeat   Int      @default(3600) // seconds
+  updatedAtBlock Int   @default(0)
+  roundId     Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@map("oracle_state")
+}
+
+/// Protocol allow/deny list + exposure caps
+model ProtocolConfig {
+  id          String   @id @default(cuid())
+  protocol    String   @unique // address
+  allowed     Boolean  @default(false)
+  exposureCap String   @default("0") // uint256 as string
+  updatedAtBlock Int   @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@map("protocol_config")
+}
+
+/// Parachain allow list
+model ParachainConfig {
+  id          String   @id @default(cuid())
+  parachainId Int      @unique
+  allowed     Boolean  @default(false)
+  updatedAtBlock Int   @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@map("parachain_config")
+}
+
+// ═══════════════════════════════════════════════════════════
+// HISTORICAL TABLES (append-only event logs)
+// ═══════════════════════════════════════════════════════════
+
+/// ERC-4626 Deposit event
+model Deposit {
+  id          String   @id @default(cuid())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  sender      String   // address (caller)
+  owner       String   // address (receiver of shares)
+  assets      String   // uint256
+  shares      String   // uint256
+
+  @@unique([txHash, logIndex])
+  @@index([owner])
+  @@index([blockNumber])
+  @@map("deposits")
+}
+
+/// ERC-4626 Withdraw event
+model Withdrawal {
+  id          String   @id @default(cuid())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  sender      String
+  receiver    String
+  owner       String
+  assets      String
+  shares      String
+
+  @@unique([txHash, logIndex])
+  @@index([owner])
+  @@index([blockNumber])
+  @@map("withdrawals")
+}
+
+/// WithdrawalRequested event (queued withdrawals)
+model WithdrawalRequest {
+  id          String   @id @default(cuid())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  user        String
+  shares      String
+  requestId   Int
+  fulfilled   Boolean  @default(false)
+
+  @@unique([txHash, logIndex])
+  @@index([user])
+  @@index([blockNumber])
+  @@map("withdrawal_requests")
+}
+
+/// StrategyExecuted event from ObidotVault
+model StrategyExecution {
+  id              String   @id @default(cuid())
+  txHash          String
+  logIndex        Int
+  blockNumber     Int
+  timestamp       DateTime
+  executor        String   // address that triggered
+  destination     String   // DestType enum value
+  targetChain     String   // parachain ID or chain ID
+  protocol        String   // target protocol address
+  amount          String
+  profit          String   // int256 as string
+  success         Boolean
+
+  @@unique([txHash, logIndex])
+  @@index([executor])
+  @@index([blockNumber])
+  @@map("strategy_executions")
+}
+
+/// LocalSwapExecuted event from ObidotVault
+model LocalSwap {
+  id          String   @id @default(cuid())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  tokenIn     String
+  tokenOut    String
+  amountIn    String
+  amountOut   String
+  executor    String
+
+  @@unique([txHash, logIndex])
+  @@index([blockNumber])
+  @@map("local_swaps")
+}
+
+/// IntentExecuted event from ObidotVault
+model IntentExecution {
+  id             String   @id @default(cuid())
+  txHash         String
+  logIndex       Int
+  blockNumber    Int
+  timestamp      DateTime
+  solver         String   // address
+  intentHash     String   // bytes32
+  tokenIn        String
+  tokenOut       String
+  amountIn       String
+  minAmountOut   String
+  actualOut      String?  // filled post-execution if available
+  destination    String   // DestType
+  targetChain    String
+  deadline       DateTime
+  nonce          Int
+
+  @@unique([txHash, logIndex])
+  @@index([solver])
+  @@index([blockNumber])
+  @@map("intent_executions")
+}
+
+/// PriceUpdated event from KeeperOracle
+model OracleUpdate {
+  id          String   @id @default(cuid())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  feed        String   // oracle address
+  price       String   // int256
+  roundId     Int
+  updater     String   // keeper address
+
+  @@unique([txHash, logIndex])
+  @@index([feed])
+  @@index([blockNumber])
+  @@map("oracle_updates")
+}
+
+/// Swapped event from SwapRouter
+model SwapExecution {
+  id          String   @id @default(cuid())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  tokenIn     String
+  tokenOut    String
+  amountIn    String
+  amountOut   String
+  recipient   String
+  poolType    String   // PoolType enum name
+  hops        Int      @default(1)
+
+  @@unique([txHash, logIndex])
+  @@index([blockNumber])
+  @@map("swap_executions")
+}
+
+/// Cross-chain message dispatched (via ISMP / Hyperbridge)
+model CrossChainDispatch {
+  id             String   @id @default(cuid())
+  txHash         String
+  logIndex       Int
+  blockNumber    Int
+  timestamp      DateTime
+  messageType    String   // CrossChainCodec message type
+  sourceChain    String
+  destChain      String
+  sender         String
+  data           String   // hex-encoded payload
+  commitment     String?  // ISMP commitment hash
+  status         String   @default("dispatched") // dispatched | accepted | timeout
+
+  @@unique([txHash, logIndex])
+  @@index([blockNumber])
+  @@index([status])
+  @@map("cross_chain_dispatches")
+}
+
+/// BifrostStrategyDispatched event
+model BifrostStrategy {
+  id             String   @id @default(cuid())
+  txHash         String
+  logIndex       Int
+  blockNumber    Int
+  timestamp      DateTime
+  strategyType   String   // mint_vtoken, swap, farm, etc.
+  tokenIn        String
+  amount         String
+  xcmFee         String
+  caller         String
+
+  @@unique([txHash, logIndex])
+  @@index([blockNumber])
+  @@map("bifrost_strategies")
+}
+
+// ═══════════════════════════════════════════════════════════
+// INFRASTRUCTURE
+// ═══════════════════════════════════════════════════════════
+
+/// Per-contract sync cursor (last indexed block)
+model SyncCursor {
+  id              String   @id @default(cuid())
+  contractAddress String   @unique
+  contractName    String
+  lastBlock       Int      @default(0)
+  lastTxHash      String?
+  lastLogIndex    Int?
+  updatedAt       DateTime @updatedAt
+
+  @@map("sync_cursors")
+}
+
+/// Token metadata cache
+model Token {
+  id       String @id @default(cuid())
+  address  String @unique
+  symbol   String
+  name     String
+  decimals Int
+
+  @@map("tokens")
+}
