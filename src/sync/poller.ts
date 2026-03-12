@@ -19,6 +19,7 @@ import {
   handleExecutorEvent,
   handleBifrostEvent,
 } from "./handlers/executor.js";
+import { handleRouterEvent } from "./handlers/router.js";
 import { logger } from "../utils/logger.js";
 
 // ── Handler Dispatch Map ─────────────────────────────────
@@ -36,6 +37,7 @@ const HANDLER_MAP: Record<string, EventHandler> = {
   BifrostAdapter: handleBifrostEvent,
   XCMExecutor: handleExecutorEvent,
   HyperExecutor: handleExecutorEvent,
+  SwapRouter: handleRouterEvent,
   // NativeAsset events (Transfer/Approval) are ERC-20 standard —
   // not indexed separately for now (too noisy). Can be added later.
 };

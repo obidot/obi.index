@@ -6,7 +6,7 @@ Obidot indexer + AI agent. TypeScript backend that indexes all Obidot smart-cont
 
 `obi.index` is a purpose-built indexer for the Obidot DEX aggregator on Polkadot Hub. It has three responsibilities:
 
-1. **Sync** — Polls Blockscout REST API every 60 seconds for event logs across all 9 deployed contracts. Decodes logs via viem ABI. Writes historical records and current-state snapshots to PostgreSQL via Prisma.
+1. **Sync** — Polls Blockscout REST API every 60 seconds for event logs across all 10 deployed contracts. Decodes logs via viem ABI. Writes historical records and current-state snapshots to PostgreSQL via Prisma.
 2. **Serve** — Apollo Server 4 GraphQL API on port 4350 with queries for vault state, oracle prices, deposits, withdrawals, strategies, swaps, intents, cross-chain messages, and user positions.
 3. **Agent** — AI-driven orchestrator runs on a 5-minute loop: evaluates yield opportunities and arbitrage from on-chain data, sends a state snapshot to an LLM for analysis, then builds and submits a signed EIP-712 `UniversalIntent` to `ObidotVault.executeIntent()` when confidence ≥ 60%.
 
@@ -29,6 +29,7 @@ Polkadot Hub TestNet (chain 420420417)
         │
         ├── handleVaultEvent     → deposits, withdrawals, strategies, intents, config
         ├── handleOracleEvent    → oracle_updates, oracle_state
+        ├── handleRouterEvent    → swap_executions
         ├── handleCrossChainEvent→ cross_chain_dispatches
         ├── handleExecutorEvent  → logs only (correlated via tx)
         └── handleBifrostEvent   → bifrost_strategies
@@ -189,23 +190,24 @@ obi.index/
 | `SyncCursor` | Last indexed block per contract (resumes after restart) |
 | `Token`      | ERC-20 metadata cache (symbol, name, decimals)          |
 
-## Contract Registry (9 Contracts Indexed)
+## Contract Registry (10 Contracts Indexed)
 
 All addresses are on **Polkadot Hub TestNet** (chain `420420417`).
 
 | Contract Name    | Address                                      | Phase |
 | ---------------- | -------------------------------------------- | ----- |
-| ObidotVault      | `0x37D7959f5f97D37799E0d04b7684c41CB2Ff878d` | 1     |
 | KeeperOracle     | `0xf64d93DC125AC1B366532BBbA165615f6D566C7F` | 1     |
 | OracleRegistry   | `0x8b7C7345d6cF9de45f4aacC61F56F0241d47e88B` | 1     |
-| CrossChainRouter | `0xE65D7B65a1972A82bCF65f6711a43355Faa3f490` | 1     |
 | BifrostAdapter   | `0x265Cb785De0fF2e5BcebDEb53095aDCAE9175527` | 1     |
 | XCMExecutor      | `0xE8FDc9093395eA02017d5D66899F3E04CFF1CF64` | 2     |
-| HyperExecutor    | `0xaEC0009B15449102a39204259d07c2517cf8fC0f` | 2     |
 | NativeAssetDOT   | `0xE72453bD8d5ECF56ccdDeF949C8AE0Cea5A41E7d` | 2     |
 | NativeAssetUSDC  | `0xAf233E9f2ED78022CAdEA58a84144ce6BcDFd63E` | 2     |
+| SwapRouter       | `0xfbc3fEB4DA6f00049af278eC3ecaCAFF7f08DDbB` | 6     |
+| CrossChainRouter | `0xE2fFfb3B5C72f99811bC20D857035611bFCe5b5d` | 7     |
+| HyperExecutor    | `0x5d4695951B6639A6B4ef90B2D911C867aBbb2B61` | 7     |
+| ObidotVault      | `0x03473a95971Ba0496786a615e21b1e87bDFf0025` | 8     |
 
-**Not yet deployed (no registry entry):** SwapRouter, SwapQuoter, HydrationOmnipoolAdapter, AssetHubPairAdapter, BifrostDEXAdapter. Add to `CONTRACT_REGISTRY` in `src/config/contracts.ts` when deployed.
+**Not indexed (no events):** SwapQuoter (read-only), HydrationOmnipoolAdapter, AssetHubPairAdapter, BifrostDEXAdapter (adapter events route through SwapRouter).
 
 ## GraphQL API (port 4350)
 

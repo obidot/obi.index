@@ -12,14 +12,18 @@ export const ADDRESSES = {
   TestDOT: "0x2402C804aD8a6217BF73D8483dA7564065c56083" as Address,
   KeeperOracle: "0xf64d93DC125AC1B366532BBbA165615f6D566C7F" as Address,
   OracleRegistry: "0x8b7C7345d6cF9de45f4aacC61F56F0241d47e88B" as Address,
-  ObidotVault: "0x37D7959f5f97D37799E0d04b7684c41CB2Ff878d" as Address,
-  CrossChainRouter: "0xE65D7B65a1972A82bCF65f6711a43355Faa3f490" as Address,
   BifrostAdapter: "0x265Cb785De0fF2e5BcebDEb53095aDCAE9175527" as Address,
   // Phase 2 (2026-03-04)
   XCMExecutor: "0xE8FDc9093395eA02017d5D66899F3E04CFF1CF64" as Address,
-  HyperExecutor: "0xaEC0009B15449102a39204259d07c2517cf8fC0f" as Address,
   NativeAssetDOT: "0xE72453bD8d5ECF56ccdDeF949C8AE0Cea5A41E7d" as Address,
   NativeAssetUSDC: "0xAf233E9f2ED78022CAdEA58a84144ce6BcDFd63E" as Address,
+  // Phase 3 (2026-03-11)
+  SwapRouter: "0xfbc3fEB4DA6f00049af278eC3ecaCAFF7f08DDbB" as Address,
+  // Phase 7 (2026-03-12)
+  HyperExecutor: "0x5d4695951B6639A6B4ef90B2D911C867aBbb2B61" as Address,
+  CrossChainRouter: "0xE2fFfb3B5C72f99811bC20D857035611bFCe5b5d" as Address,
+  // Phase 8 (2026-03-12)
+  ObidotVault: "0x03473a95971Ba0496786a615e21b1e87bDFf0025" as Address,
 } as const;
 
 // ═══════════════════════════════════════════════════════════
@@ -664,6 +668,11 @@ export const CONTRACT_REGISTRY: ContractEntry[] = [
     name: "HyperExecutor",
     address: ADDRESSES.HyperExecutor,
     abi: HYPER_EXECUTOR_ABI,
+  },
+  {
+    name: "SwapRouter",
+    address: ADDRESSES.SwapRouter,
+    abi: SWAP_ROUTER_ABI,
   },
   {
     name: "NativeAssetDOT",
