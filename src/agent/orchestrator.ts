@@ -1,5 +1,6 @@
 // ── Agent Orchestrator ───────────────────────────────────
-// Main loop: evaluate → analyze → build intent → sign → execute
+// Main loop: health check → evaluate → snapshot → analyze → sign → execute.
+// Handles UniversalIntent (XCM/Hyper cross-chain) and StrategyIntent (local swaps).
 
 import { PrismaClient } from "@prisma/client";
 import { StrategyEvaluator } from "./strategy/evaluator.js";
@@ -7,37 +8,48 @@ import { ArbitrageDetector } from "./strategy/arbitrage.js";
 import { LLMAnalyzer } from "./llm/analyzer.js";
 import { createLLMProvider } from "./llm/provider.js";
 import {
-  buildIntent,
+  buildUniversalIntent,
+  buildStrategyIntent,
+  computeMinOut,
   DestType,
-  type UniversalIntent,
 } from "./intent/builder.js";
-import { signIntent, getAgentAddress } from "./intent/signer.js";
+import { signUniversalIntent, signStrategyIntent, getAgentAddress } from "./intent/signer.js";
 import { TransactionExecutor } from "./executor/transaction.js";
+import { readVaultState, readOracleState } from "../sync/rpc.js";
 import { ADDRESSES } from "../config/contracts.js";
+import { AGENT_MAX_SLIPPAGE_BPS } from "../config/constants.js";
 import { logger } from "../utils/logger.js";
 import type { Address } from "viem";
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
 const AGENT_LOOP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const MIN_CONFIDENCE = 60; // Only act on recommendations with >= 60% confidence
+const MIN_CONFIDENCE = 60; // act on recommendations with >= 60% confidence
+const MIN_VAULT_ASSETS = 1_000_000_000_000_000_000n; // 1 DOT — don't act on empty vault
+const INTENT_DEADLINE_SECONDS = 300; // 5 minutes until intent expires
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Orchestrator
+// ─────────────────────────────────────────────────────────────────────────────
 
 export class Orchestrator {
-  private evaluator: StrategyEvaluator;
-  private arbitrage: ArbitrageDetector;
-  private analyzer: LLMAnalyzer;
-  private executor: TransactionExecutor;
+  private readonly evaluator: StrategyEvaluator;
+  private readonly arbitrage: ArbitrageDetector;
+  private readonly analyzer: LLMAnalyzer;
+  private readonly executor: TransactionExecutor;
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
 
   constructor(prisma: PrismaClient) {
     this.evaluator = new StrategyEvaluator(prisma);
     this.arbitrage = new ArbitrageDetector(prisma);
-
-    const llmProvider = createLLMProvider();
-    this.analyzer = new LLMAnalyzer(llmProvider);
+    this.analyzer = new LLMAnalyzer(createLLMProvider());
     this.executor = new TransactionExecutor();
   }
 
-  /** Start the agent loop */
+  /** Start the agent loop. Runs immediately then on AGENT_LOOP_INTERVAL_MS. */
   start(): void {
     if (this.timer) return;
 
@@ -46,12 +58,11 @@ export class Orchestrator {
       "Starting agent orchestrator",
     );
 
-    // Run immediately, then on interval
     void this.cycle();
     this.timer = setInterval(() => void this.cycle(), AGENT_LOOP_INTERVAL_MS);
   }
 
-  /** Stop the agent loop */
+  /** Stop the agent loop after the current cycle completes. */
   stop(): void {
     if (this.timer) {
       clearInterval(this.timer);
@@ -60,10 +71,14 @@ export class Orchestrator {
     logger.info("Agent orchestrator stopped");
   }
 
-  /** Execute a single agent cycle */
+  // ─────────────────────────────────────────────────────────────────────
+  //  Cycle
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Execute a single agent decision cycle. */
   async cycle(): Promise<void> {
     if (this.running) {
-      logger.warn("Previous agent cycle still running — skipping");
+      logger.warn("Previous cycle still running — skipping");
       return;
     }
 
@@ -71,29 +86,38 @@ export class Orchestrator {
     const startTime = Date.now();
 
     try {
-      logger.info("Starting agent cycle");
+      logger.info("Agent cycle started");
 
-      // Step 1: Evaluate strategies from on-chain data
-      const opportunities = await this.evaluator.evaluate();
+      // ── Phase 0: Vault health check (via live RPC) ─────────────────
+      const vaultState = await readVaultState().catch(() => null);
+      if (!vaultState) {
+        logger.warn("Cannot read vault state via RPC — skipping cycle");
+        return;
+      }
+      if (vaultState.paused) {
+        logger.warn("Vault is paused — skipping cycle");
+        return;
+      }
+      if (vaultState.totalAssets < MIN_VAULT_ASSETS) {
+        logger.info("Vault totalAssets below 1 DOT — skipping cycle");
+        return;
+      }
+
+      // ── Phase 1: Strategy evaluation ──────────────────────────────
+      const [opportunities, arbOpportunities] = await Promise.all([
+        this.evaluator.evaluate(),
+        this.arbitrage.detect(),
+      ]);
       logger.info(
-        { opportunities: opportunities.length },
-        "Opportunities found",
+        { opportunities: opportunities.length, arbitrage: arbOpportunities.length },
+        "Evaluation complete",
       );
 
-      // Step 2: Detect arbitrage
-      const arbOpportunities = await this.arbitrage.detect();
-      logger.info(
-        { arbitrage: arbOpportunities.length },
-        "Arbitrage scan complete",
-      );
-
-      // Step 3: Build state snapshot for LLM
-      const snapshot = await this.evaluator.buildStateSnapshot();
-
-      // Enrich snapshot with detected opportunities
+      // ── Phase 2: Build enriched LLM snapshot ──────────────────────
+      const baseSnapshot = await this.evaluator.buildStateSnapshot();
       const enrichedSnapshot = JSON.stringify(
         {
-          ...JSON.parse(snapshot),
+          ...JSON.parse(baseSnapshot),
           yieldOpportunities: opportunities,
           arbitrageOpportunities: arbOpportunities.filter((a) => a.viable),
         },
@@ -101,38 +125,32 @@ export class Orchestrator {
         2,
       );
 
-      // Step 4: LLM analysis
+      // ── Phase 3: LLM analysis ─────────────────────────────────────
       const analysis = await this.analyzer.analyze(enrichedSnapshot);
-
       logger.info(
         {
           recommendation: analysis.recommendation,
           confidence: analysis.confidence,
           reasoning: analysis.reasoning,
         },
-        "LLM recommendation received",
+        "LLM recommendation",
       );
 
-      // Step 5: Execute if confidence is high enough and action is not "hold"
+      // ── Phase 4: Execute if above threshold ────────────────────────
       if (
         analysis.confidence >= MIN_CONFIDENCE &&
         analysis.recommendation !== "hold" &&
         analysis.suggestedAction
       ) {
-        await this.executeRecommendation(analysis);
+        await this._execute(analysis.recommendation, analysis.suggestedAction, vaultState);
       } else {
         logger.info(
-          {
-            confidence: analysis.confidence,
-            recommendation: analysis.recommendation,
-            threshold: MIN_CONFIDENCE,
-          },
-          "Skipping execution (below threshold or hold)",
+          { confidence: analysis.confidence, threshold: MIN_CONFIDENCE },
+          "Below threshold or hold — no action",
         );
       }
 
-      const elapsed = Date.now() - startTime;
-      logger.info({ elapsedMs: elapsed }, "Agent cycle complete");
+      logger.info({ elapsedMs: Date.now() - startTime }, "Agent cycle complete");
     } catch (error) {
       logger.error({ error }, "Agent cycle failed");
     } finally {
@@ -140,65 +158,228 @@ export class Orchestrator {
     }
   }
 
-  /** Execute a recommended strategy */
-  private async executeRecommendation(analysis: {
-    recommendation: string;
-    suggestedAction?: {
+  // ─────────────────────────────────────────────────────────────────────
+  //  Execution Routing
+  // ─────────────────────────────────────────────────────────────────────
+
+  private async _execute(
+    recommendation: string,
+    action: {
       tokenIn?: string;
       tokenOut?: string;
       amount?: string;
+      targetParachain?: string;
       targetChain?: string;
       protocol?: string;
-    };
-  }): Promise<void> {
-    const action = analysis.suggestedAction;
-    if (!action) return;
-
+      poolType?: number;
+      pool?: string;
+      feeBps?: string;
+    },
+    vaultState: { totalAssets: bigint; paused: boolean },
+  ): Promise<void> {
     try {
-      // Determine destination type
-      let destination = DestType.Local;
-      let targetChain = 0n;
-
-      if (action.targetChain) {
-        const chainId = BigInt(action.targetChain);
-        if (chainId > 0 && chainId < 10000) {
-          destination = DestType.Parachain;
-          targetChain = chainId;
-        } else if (chainId > 10000) {
-          destination = DestType.EVMChain;
-          targetChain = chainId;
-        }
+      switch (recommendation) {
+        case "xcm_strategy":
+          await this._executeXcmIntent(action, vaultState.totalAssets);
+          break;
+        case "hyper_strategy":
+          await this._executeHyperIntent(action, vaultState.totalAssets);
+          break;
+        case "local_swap":
+        case "arbitrage":
+          await this._executeLocalSwap(action, vaultState.totalAssets);
+          break;
+        default:
+          logger.warn({ recommendation }, "Unknown recommendation type — skipping");
       }
-
-      const nonce = await this.executor.getNonce();
-
-      const intent: UniversalIntent = buildIntent({
-        tokenIn: (action.tokenIn ?? ADDRESSES.NativeAssetDOT) as Address,
-        tokenOut: (action.tokenOut ?? ADDRESSES.NativeAssetUSDC) as Address,
-        amountIn: BigInt(action.amount ?? "0"),
-        minAmountOut: 0n, // Agent accepts any output (slippage guard in contract)
-        destination,
-        targetChain,
-        targetProtocol: (action.protocol ?? ADDRESSES.ObidotVault) as Address,
-        strategist: getAgentAddress(),
-        nonce,
-        deadlineSeconds: 300,
-      });
-
-      // Sign
-      const signature = await signIntent(intent);
-
-      // Execute
-      const txHash = await this.executor.executeIntent(intent, signature);
-      logger.info(
-        { txHash, recommendation: analysis.recommendation },
-        "Strategy executed on-chain",
-      );
     } catch (error) {
-      logger.error(
-        { error, recommendation: analysis.recommendation },
-        "Failed to execute strategy",
-      );
+      logger.error({ error, recommendation }, "Execution failed");
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Cross-chain: XCM (Native DestType)
+  // ─────────────────────────────────────────────────────────────────────
+
+  private async _executeXcmIntent(
+    action: { tokenIn?: string; tokenOut?: string; amount?: string; targetParachain?: string; protocol?: string },
+    totalAssets: bigint,
+  ): Promise<void> {
+    const amount = this._validateAmount(action.amount, totalAssets);
+    if (amount === null) return;
+
+    const paraId = action.targetParachain ? Number(action.targetParachain) : 0;
+    if (paraId === 0) {
+      logger.warn("xcm_strategy requires a non-zero targetParachain — skipping");
+      return;
+    }
+
+    const oracleState = await readOracleState().catch(() => null);
+    const minOut = oracleState
+      ? computeMinOut(amount, oracleState.price, oracleState.decimals, BigInt(AGENT_MAX_SLIPPAGE_BPS))
+      : 0n;
+
+    const nonce = await this.executor.getIntentNonce();
+
+    const intent = buildUniversalIntent({
+      inToken: (action.tokenIn ?? ADDRESSES.NativeAssetDOT) as Address,
+      outToken: (action.tokenOut ?? ADDRESSES.NativeAssetDOT) as Address,
+      amount,
+      minOut,
+      dest: { destType: DestType.Native, paraId, chainId: 0 },
+      calldata_: "0x",
+      nonce,
+      deadlineSeconds: INTENT_DEADLINE_SECONDS,
+    });
+
+    const signature = await signUniversalIntent(intent);
+    const txHash = await this.executor.executeIntent(intent, signature);
+    logger.info({ txHash, paraId, amount: amount.toString() }, "XCM intent executed");
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Cross-chain: Hyperbridge (Hyper DestType)
+  // ─────────────────────────────────────────────────────────────────────
+
+  private async _executeHyperIntent(
+    action: { tokenIn?: string; tokenOut?: string; amount?: string; targetChain?: string; protocol?: string },
+    totalAssets: bigint,
+  ): Promise<void> {
+    const amount = this._validateAmount(action.amount, totalAssets);
+    if (amount === null) return;
+
+    // targetChain: 0=Ethereum, 1=Base, 2=Arbitrum
+    const chainId = action.targetChain !== undefined ? Number(action.targetChain) : 0;
+
+    const oracleState = await readOracleState().catch(() => null);
+    const minOut = oracleState
+      ? computeMinOut(amount, oracleState.price, oracleState.decimals, BigInt(AGENT_MAX_SLIPPAGE_BPS))
+      : 0n;
+
+    const nonce = await this.executor.getIntentNonce();
+
+    const intent = buildUniversalIntent({
+      inToken: (action.tokenIn ?? ADDRESSES.NativeAssetDOT) as Address,
+      outToken: (action.tokenOut ?? ADDRESSES.NativeAssetDOT) as Address,
+      amount,
+      minOut,
+      dest: { destType: DestType.Hyper, paraId: 0, chainId },
+      calldata_: "0x",
+      nonce,
+      deadlineSeconds: INTENT_DEADLINE_SECONDS,
+    });
+
+    const signature = await signUniversalIntent(intent);
+    const txHash = await this.executor.executeIntent(intent, signature);
+    logger.info({ txHash, chainId, amount: amount.toString() }, "Hyperbridge intent executed");
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Local swap / arbitrage via executeLocalSwap
+  // ─────────────────────────────────────────────────────────────────────
+
+  private async _executeLocalSwap(
+    action: {
+      tokenIn?: string;
+      tokenOut?: string;
+      amount?: string;
+      poolType?: number;
+      pool?: string;
+      feeBps?: string;
+    },
+    totalAssets: bigint,
+  ): Promise<void> {
+    const amount = this._validateAmount(action.amount, totalAssets);
+    if (amount === null) return;
+
+    const tokenIn = (action.tokenIn ?? ADDRESSES.NativeAssetDOT) as Address;
+    const tokenOut = (action.tokenOut ?? ADDRESSES.NativeAssetUSDC) as Address;
+    const poolType = action.poolType ?? 0; // default HydrationOmnipool
+    const pool = (action.pool ?? ADDRESSES.SwapRouter) as Address;
+    const feeBps = BigInt(action.feeBps ?? "30"); // default 30 bps
+
+    const oracleState = await readOracleState().catch(() => null);
+    const minAmountOut = oracleState
+      ? computeMinOut(amount, oracleState.price, oracleState.decimals, BigInt(AGENT_MAX_SLIPPAGE_BPS))
+      : 0n;
+
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + INTENT_DEADLINE_SECONDS);
+
+    const nonce = await this.executor.getStrategyNonce();
+
+    const strategyIntent = buildStrategyIntent({
+      asset: (ADDRESSES.NativeAssetDOT) as Address,
+      amount,
+      minReturn: minAmountOut,
+      maxSlippageBps: BigInt(AGENT_MAX_SLIPPAGE_BPS),
+      nonce,
+      deadlineSeconds: INTENT_DEADLINE_SECONDS,
+    });
+
+    const signature = await signStrategyIntent(strategyIntent);
+
+    const txHash = await this.executor.executeLocalSwap(
+      {
+        poolType,
+        pool,
+        tokenIn,
+        tokenOut,
+        feeBps,
+        data: "0x0000000000000000000000000000000000000000000000000000000000000000",
+        amountIn: amount,
+        minAmountOut,
+        to: getAgentAddress(),
+        deadline,
+      },
+      strategyIntent,
+      signature,
+    );
+
+    logger.info(
+      { txHash, tokenIn, tokenOut, amount: amount.toString() },
+      "Local swap executed",
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Helpers
+  // ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * Validate the LLM-supplied amount string:
+   * - Must be a valid positive integer string
+   * - Must not exceed 20% of totalAssets (single-deployment cap)
+   * Returns parsed BigInt or null if invalid.
+   */
+  private _validateAmount(amountStr: string | undefined, totalAssets: bigint): bigint | null {
+    if (!amountStr) {
+      logger.warn("No amount in suggestedAction — skipping");
+      return null;
+    }
+
+    let amount: bigint;
+    try {
+      amount = BigInt(amountStr);
+    } catch {
+      logger.warn({ amountStr }, "Invalid amount string — skipping");
+      return null;
+    }
+
+    if (amount <= 0n) {
+      logger.warn({ amount: amount.toString() }, "Non-positive amount — skipping");
+      return null;
+    }
+
+    // Cap at 20% of totalAssets
+    const cap = totalAssets / 5n;
+    if (amount > cap) {
+      logger.warn(
+        { amount: amount.toString(), cap: cap.toString() },
+        "Amount exceeds 20% of totalAssets — capping",
+      );
+      amount = cap;
+    }
+
+    return amount;
   }
 }

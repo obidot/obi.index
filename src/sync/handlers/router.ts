@@ -3,6 +3,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 import type { DecodedEvent } from "../decoder.js";
+import { pubsub, Topics } from "../../graphql/pubsub.js";
 import { logger } from "../../utils/logger.js";
 
 /** PoolType enum from ISwapRouter.sol */
@@ -48,6 +49,22 @@ export async function handleRouterEvent(
         },
         "Swap indexed",
       );
+
+      // Emit real-time subscription event
+      pubsub.publish(Topics.SWAP_EXECUTED, {
+        txHash,
+        logIndex,
+        blockNumber,
+        timestamp,
+        tokenIn: String(args.tokenIn),
+        tokenOut: String(args.tokenOut),
+        amountIn: String(args.amountIn),
+        amountOut: String(args.amountOut),
+        recipient: String(args.sender),
+        poolType:
+          POOL_TYPE_NAMES[Number(args.poolType)] ?? `unknown(${args.poolType})`,
+        id: `${txHash}-${logIndex}`,
+      });
       break;
 
     case "AdapterSet":

@@ -253,4 +253,28 @@ export const typeDefs = `#graphql
     syncCursors: [SyncCursor!]!
     tokens: [Token!]!
   }
+
+  # ═══════════════════════════════════════════════════════
+  # SUBSCRIPTIONS — real-time event feed for the frontend
+  # ═══════════════════════════════════════════════════════
+
+  type Subscription {
+    """Fires whenever a new Deposit event is indexed."""
+    depositAdded: Deposit!
+
+    """Fires whenever a new Withdrawal event is indexed."""
+    withdrawalAdded: Withdrawal!
+
+    """Fires whenever a StrategyExecuted event is indexed."""
+    strategyExecuted: StrategyExecution!
+
+    """Fires whenever an IntentExecuted event is indexed."""
+    intentExecuted: IntentExecution!
+
+    """Fires whenever a PriceUpdated oracle event is indexed."""
+    oracleUpdated: OracleUpdate!
+
+    """Fires whenever a SwapRouter Swapped event is indexed."""
+    swapExecuted: SwapExecution!
+  }
 `;

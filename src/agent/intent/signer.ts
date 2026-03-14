@@ -1,5 +1,6 @@
 // ── Intent Signer ────────────────────────────────────────
-// Signs EIP-712 UniversalIntent using the agent's private key.
+// Signs UniversalIntent (EIP-712 nested structs) and StrategyIntent
+// using the agent's private key via viem's signTypedData.
 
 import {
   createWalletClient,
@@ -16,33 +17,39 @@ import {
 } from "../../config/constants.js";
 import {
   type UniversalIntent,
+  type StrategyIntent,
   INTENT_DOMAIN,
-  INTENT_TYPES,
+  UNIVERSAL_INTENT_TYPES,
+  STRATEGY_INTENT_TYPES,
 } from "./builder.js";
 import { logger } from "../../utils/logger.js";
 
-// Custom chain definition
+// ─────────────────────────────────────────────────────────────────────────────
+//  Chain Definition
+// ─────────────────────────────────────────────────────────────────────────────
+
 const polkadotHubTestnet = {
   id: CHAIN_ID,
   name: "Polkadot Hub TestNet",
   nativeCurrency: { name: "DOT", symbol: "DOT", decimals: 18 },
-  rpcUrls: {
-    default: { http: [RPC_URL] },
-  },
+  rpcUrls: { default: { http: [RPC_URL] } },
+  testnet: true,
 } as const;
 
-let _wallet: WalletClient | null = null;
+// ─────────────────────────────────────────────────────────────────────────────
+//  Lazy Wallet Singleton
+// ─────────────────────────────────────────────────────────────────────────────
+
 let _account: ReturnType<typeof privateKeyToAccount> | null = null;
+let _wallet: WalletClient | null = null;
 
 function getWallet(): {
-  wallet: WalletClient;
   account: ReturnType<typeof privateKeyToAccount>;
+  wallet: WalletClient;
 } {
-  if (!AGENT_PRIVATE_KEY) {
-    throw new Error("AGENT_PRIVATE_KEY is not configured");
-  }
+  if (!AGENT_PRIVATE_KEY) throw new Error("AGENT_PRIVATE_KEY not configured");
 
-  if (!_wallet || !_account) {
+  if (!_account || !_wallet) {
     _account = privateKeyToAccount(AGENT_PRIVATE_KEY as Hex);
     _wallet = createWalletClient({
       account: _account,
@@ -51,20 +58,33 @@ function getWallet(): {
     });
   }
 
-  return { wallet: _wallet, account: _account };
+  return { account: _account, wallet: _wallet };
 }
 
-/** Get the agent's address */
+/** Return the agent's EVM address (derived from AGENT_PRIVATE_KEY). */
 export function getAgentAddress(): Address {
-  const { account } = getWallet();
-  return account.address;
+  return getWallet().account.address;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  UniversalIntent Signing
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Sign a UniversalIntent using EIP-712 typed data.
- * Returns the signature bytes.
+ *
+ * The nested Asset and Destination sub-types are included in the type
+ * definition so viem computes the same typehash as IntentDomain.sol:
+ *   UNIVERSAL_INTENT_TYPEHASH = keccak256(
+ *     "UniversalIntent(Asset inAsset,Asset outAsset,uint256 amount,uint256 minOut,
+ *      Destination dest,bytes calldata_,uint256 nonce,uint256 deadline)"
+ *     "Asset(address token,uint256 assetId)"
+ *     "Destination(uint8 destType,uint32 paraId,uint8 chainId)"
+ *   )
+ *
+ * The signer must hold SOLVER_ROLE on ObidotVault to execute.
  */
-export async function signIntent(intent: UniversalIntent): Promise<Hex> {
+export async function signUniversalIntent(intent: UniversalIntent): Promise<Hex> {
   const { account } = getWallet();
 
   const signature = await account.signTypedData({
@@ -74,25 +94,80 @@ export async function signIntent(intent: UniversalIntent): Promise<Hex> {
       chainId: INTENT_DOMAIN.chainId,
       verifyingContract: INTENT_DOMAIN.verifyingContract,
     },
-    types: INTENT_TYPES,
+    types: UNIVERSAL_INTENT_TYPES,
     primaryType: "UniversalIntent",
     message: {
-      tokenIn: intent.tokenIn,
-      tokenOut: intent.tokenOut,
-      amountIn: intent.amountIn,
-      minAmountOut: intent.minAmountOut,
-      destination: intent.destination,
-      targetChain: intent.targetChain,
-      targetProtocol: intent.targetProtocol,
-      deadline: intent.deadline,
+      inAsset: {
+        token: intent.inAsset.token,
+        assetId: intent.inAsset.assetId,
+      },
+      outAsset: {
+        token: intent.outAsset.token,
+        assetId: intent.outAsset.assetId,
+      },
+      amount: intent.amount,
+      minOut: intent.minOut,
+      dest: {
+        destType: intent.dest.destType,
+        paraId: intent.dest.paraId,
+        chainId: intent.dest.chainId,
+      },
+      calldata_: intent.calldata_,
       nonce: intent.nonce,
-      strategist: intent.strategist,
+      deadline: intent.deadline,
     },
   });
 
   logger.info(
     { signer: account.address, nonce: intent.nonce.toString() },
-    "Intent signed",
+    "UniversalIntent signed",
+  );
+
+  return signature;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  StrategyIntent Signing
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Sign a StrategyIntent using EIP-712 typed data.
+ *
+ * Typehash matches ObidotVault.sol line 61:
+ *   "StrategyIntent(address asset,uint256 amount,uint256 minReturn,
+ *    uint256 maxSlippageBps,uint256 deadline,uint256 nonce,
+ *    bytes xcmCall,uint32 targetParachain,address targetProtocol)"
+ *
+ * The signer must hold STRATEGIST_ROLE on ObidotVault to execute.
+ */
+export async function signStrategyIntent(intent: StrategyIntent): Promise<Hex> {
+  const { account } = getWallet();
+
+  const signature = await account.signTypedData({
+    domain: {
+      name: INTENT_DOMAIN.name,
+      version: INTENT_DOMAIN.version,
+      chainId: INTENT_DOMAIN.chainId,
+      verifyingContract: INTENT_DOMAIN.verifyingContract,
+    },
+    types: STRATEGY_INTENT_TYPES,
+    primaryType: "StrategyIntent",
+    message: {
+      asset: intent.asset,
+      amount: intent.amount,
+      minReturn: intent.minReturn,
+      maxSlippageBps: intent.maxSlippageBps,
+      deadline: intent.deadline,
+      nonce: intent.nonce,
+      xcmCall: intent.xcmCall,
+      targetParachain: intent.targetParachain,
+      targetProtocol: intent.targetProtocol,
+    },
+  });
+
+  logger.info(
+    { signer: account.address, nonce: intent.nonce.toString() },
+    "StrategyIntent signed",
   );
 
   return signature;

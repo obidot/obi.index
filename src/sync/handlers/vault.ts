@@ -1,8 +1,12 @@
 // ── Vault Event Handlers ─────────────────────────────────
-// Processes ObidotVault + ERC4626 events → Prisma writes
+// Processes ObidotVault + ERC4626 events → Prisma writes.
+// After Deposit/Withdraw events, triggers a live RPC refresh of VaultState
+// so the agent always sees accurate totalAssets/totalSupply.
 
 import type { PrismaClient } from "@prisma/client";
 import type { DecodedEvent } from "../decoder.js";
+import { readVaultState } from "../rpc.js";
+import { pubsub, Topics } from "../../graphql/pubsub.js";
 import { logger } from "../../utils/logger.js";
 
 export async function handleVaultEvent(
@@ -28,15 +32,19 @@ export async function handleVaultEvent(
         },
         update: {},
       });
-      // Update vault state counters
-      await prisma.vaultState.upsert({
-        where: { id: "singleton" },
-        create: {
-          id: "singleton",
-          address: event.contractAddress,
-          updatedAtBlock: blockNumber,
-        },
-        update: { updatedAtBlock: blockNumber },
+      // Refresh VaultState from live RPC so totalAssets/totalSupply stay accurate
+      await refreshVaultState(prisma, event.contractAddress, blockNumber);
+      // Emit real-time subscription event
+      pubsub.publish(Topics.DEPOSIT_ADDED, {
+        txHash,
+        owner: String(args.owner),
+        assets: String(args.assets),
+        shares: String(args.shares),
+        sender: String(args.sender),
+        blockNumber,
+        timestamp,
+        logIndex,
+        id: `${txHash}-${logIndex}`,
       });
       logger.info(
         { txHash, owner: args.owner, assets: String(args.assets) },
@@ -59,6 +67,20 @@ export async function handleVaultEvent(
           shares: String(args.shares),
         },
         update: {},
+      });
+      // Refresh VaultState from live RPC after withdrawal
+      await refreshVaultState(prisma, event.contractAddress, blockNumber);
+      pubsub.publish(Topics.WITHDRAWAL_ADDED, {
+        txHash,
+        owner: String(args.owner),
+        receiver: String(args.receiver),
+        assets: String(args.assets),
+        shares: String(args.shares),
+        sender: String(args.sender),
+        blockNumber,
+        timestamp,
+        logIndex,
+        id: `${txHash}-${logIndex}`,
       });
       logger.info(
         { txHash, owner: args.owner, assets: String(args.assets) },
@@ -113,6 +135,7 @@ export async function handleVaultEvent(
           logIndex,
           blockNumber,
           timestamp,
+          strategyId: String(args.strategyId),
           executor: String(args.strategist),
           destination: "parachain",
           targetChain: String(args.targetParachain),
@@ -132,10 +155,7 @@ export async function handleVaultEvent(
       const pnl = String(args.pnl);
       const success = Number(args.newStatus) === 2; // StrategyStatus.Succeeded = 2
       await prisma.strategyExecution.updateMany({
-        where: {
-          blockNumber: { lte: blockNumber },
-          // Match by the first execution with no profit set for this strategy
-        },
+        where: { strategyId },
         data: { profit: pnl, success },
       });
       logger.info({ strategyId, pnl, success }, "Strategy outcome reported");
@@ -306,5 +326,53 @@ export async function handleVaultEvent(
         "Unhandled vault event (logged only)",
       );
       break;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Internal helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Refresh VaultState from a live RPC call and upsert into the DB.
+ * Called after any event that changes totalAssets or totalSupply so the
+ * agent always has accurate accounting when it wakes up.
+ * Errors are swallowed — the event itself is already persisted.
+ */
+async function refreshVaultState(
+  prisma: PrismaClient,
+  contractAddress: string,
+  blockNumber: number,
+): Promise<void> {
+  try {
+    const live = await readVaultState();
+    await prisma.vaultState.upsert({
+      where: { id: "singleton" },
+      create: {
+        id: "singleton",
+        address: contractAddress,
+        totalAssets: live.totalAssets.toString(),
+        totalSupply: live.totalSupply.toString(),
+        paused: live.paused,
+        depositCap: live.depositCap.toString(),
+        maxDailyLoss: live.maxDailyLoss.toString(),
+        totalDeposited: live.totalDeposited.toString(),
+        totalWithdrawn: live.totalWithdrawn.toString(),
+        updatedAtBlock: blockNumber,
+      },
+      update: {
+        totalAssets: live.totalAssets.toString(),
+        totalSupply: live.totalSupply.toString(),
+        paused: live.paused,
+        depositCap: live.depositCap.toString(),
+        maxDailyLoss: live.maxDailyLoss.toString(),
+        totalDeposited: live.totalDeposited.toString(),
+        totalWithdrawn: live.totalWithdrawn.toString(),
+        updatedAtBlock: blockNumber,
+      },
+    });
+    logger.debug({ blockNumber }, "VaultState refreshed from RPC");
+  } catch (err) {
+    logger.warn({ err }, "VaultState RPC refresh failed (non-fatal)");
   }
 }

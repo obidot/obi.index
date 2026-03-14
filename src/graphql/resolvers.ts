@@ -1,6 +1,7 @@
 // ── GraphQL Resolvers ────────────────────────────────────
 
 import type { PrismaClient } from "@prisma/client";
+import { pubsub, Topics } from "./pubsub.js";
 
 interface Context {
   prisma: PrismaClient;
@@ -258,6 +259,43 @@ export const resolvers = {
 
     tokens: async (_: unknown, __: unknown, { prisma }: Context) => {
       return prisma.token.findMany();
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────
+  //  Subscriptions — real-time event feed (WebSocket)
+  // ─────────────────────────────────────────────────────────────────────
+
+  Subscription: {
+    depositAdded: {
+      subscribe: () => pubsub.asyncIterator(Topics.DEPOSIT_ADDED),
+      resolve: (payload: Record<string, unknown>) =>
+        payload[Topics.DEPOSIT_ADDED],
+    },
+    withdrawalAdded: {
+      subscribe: () => pubsub.asyncIterator(Topics.WITHDRAWAL_ADDED),
+      resolve: (payload: Record<string, unknown>) =>
+        payload[Topics.WITHDRAWAL_ADDED],
+    },
+    strategyExecuted: {
+      subscribe: () => pubsub.asyncIterator(Topics.STRATEGY_EXECUTED),
+      resolve: (payload: Record<string, unknown>) =>
+        payload[Topics.STRATEGY_EXECUTED],
+    },
+    intentExecuted: {
+      subscribe: () => pubsub.asyncIterator(Topics.INTENT_EXECUTED),
+      resolve: (payload: Record<string, unknown>) =>
+        payload[Topics.INTENT_EXECUTED],
+    },
+    oracleUpdated: {
+      subscribe: () => pubsub.asyncIterator(Topics.ORACLE_UPDATED),
+      resolve: (payload: Record<string, unknown>) =>
+        payload[Topics.ORACLE_UPDATED],
+    },
+    swapExecuted: {
+      subscribe: () => pubsub.asyncIterator(Topics.SWAP_EXECUTED),
+      resolve: (payload: Record<string, unknown>) =>
+        payload[Topics.SWAP_EXECUTED],
     },
   },
 };

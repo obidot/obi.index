@@ -137,6 +137,7 @@ model StrategyExecution {
   logIndex        Int
   blockNumber     Int
   timestamp       DateTime
+  strategyId      String   // uint256 as string (on-chain strategyId)
   executor        String   // address that triggered
   destination     String   // DestType enum value
   targetChain     String   // parachain ID or chain ID
@@ -146,6 +147,7 @@ model StrategyExecution {
   success         Boolean
 
   @@unique([txHash, logIndex])
+  @@index([strategyId])
   @@index([executor])
   @@index([blockNumber])
   @@map("strategy_executions")

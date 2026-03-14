@@ -3,6 +3,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 import type { DecodedEvent } from "../decoder.js";
+import { pubsub, Topics } from "../../graphql/pubsub.js";
 import { logger } from "../../utils/logger.js";
 
 export async function handleOracleEvent(
@@ -51,6 +52,16 @@ export async function handleOracleEvent(
         { price: String(args.answer), roundId: Number(args.roundId) },
         "Oracle price updated",
       );
+
+      // Emit real-time subscription event
+      pubsub.publish(Topics.ORACLE_UPDATED, {
+        feedAddress: event.contractAddress,
+        price: String(args.answer),
+        roundId: Number(args.roundId),
+        updater: String(args.updater),
+        blockNumber,
+        timestamp,
+      });
       break;
 
     case "HeartbeatUpdated":

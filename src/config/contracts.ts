@@ -14,13 +14,16 @@ export const ADDRESSES = {
   OracleRegistry: "0x8b7C7345d6cF9de45f4aacC61F56F0241d47e88B" as Address,
   BifrostAdapter: "0x265Cb785De0fF2e5BcebDEb53095aDCAE9175527" as Address,
   // Phase 2 (2026-03-04)
-  XCMExecutor: "0xE8FDc9093395eA02017d5D66899F3E04CFF1CF64" as Address,
+  XCMExecutor: "0x011b6FAf32370dCF92a452374FfCfCdbfA20278c" as Address,
   NativeAssetDOT: "0xE72453bD8d5ECF56ccdDeF949C8AE0Cea5A41E7d" as Address,
   NativeAssetUSDC: "0xAf233E9f2ED78022CAdEA58a84144ce6BcDFd63E" as Address,
-  // Phase 3 (2026-03-11)
-  SwapRouter: "0xfbc3fEB4DA6f00049af278eC3ecaCAFF7f08DDbB" as Address,
-  // Phase 7 (2026-03-12)
-  HyperExecutor: "0x5d4695951B6639A6B4ef90B2D911C867aBbb2B61" as Address,
+  // Phase 3–12 (2026-03-11)
+  SwapRouter: "0x0A85A1B0bb893cab3b5fad7312ac241e92C8Badf" as Address,
+  SwapQuoter: "0x81d7aCFEF474DA6c76eC1b5A05a137cB9f3A5Db1" as Address,
+  HydrationOmnipoolAdapter:
+    "0xF0E1c10f97446C032A86C9643258Bb26d6129933" as Address,
+  // Phase 7–9 (2026-03-12)
+  HyperExecutor: "0x62919Cb6416Cb919fC4A30c5707a7867Ca874ca6" as Address,
   CrossChainRouter: "0xE2fFfb3B5C72f99811bC20D857035611bFCe5b5d" as Address,
   // Phase 8 (2026-03-12)
   ObidotVault: "0x03473a95971Ba0496786a615e21b1e87bDFf0025" as Address,

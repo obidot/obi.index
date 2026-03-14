@@ -22,6 +22,16 @@ export const LOG_LEVEL = process.env.LOG_LEVEL ?? "info";
 // ── LLM / Agent ─────────────────────────────────────────
 export const LLM_PROVIDER = process.env.LLM_PROVIDER ?? "openrouter";
 
+/**
+ * Maximum slippage in basis points for agent intent execution.
+ * The vault enforces a hard 2% ceiling on-chain; the agent uses this value
+ * to compute the minOut floor before signing — set lower for extra safety.
+ * Default: 200 (2%) — matches the vault's on-chain SlippageGuard.
+ */
+export const AGENT_MAX_SLIPPAGE_BPS = Number(
+  process.env.AGENT_MAX_SLIPPAGE_BPS ?? 200,
+);
+
 export const LLM_API_KEY = process.env.LLM_API_KEY ?? "";
 
 export const LLM_MODEL = process.env.LLM_MODEL ?? "anthropic/claude-sonnet-4";

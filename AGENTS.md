@@ -332,5 +332,28 @@ LOG_LEVEL="info"           # trace | debug | info | warn | error | fatal
 - Branch/title format: `[obi.index] <Title>`
 - Run `npm run typecheck` before committing — zero errors required
 - Run `npm run build` to verify compilation
+- Run `npm test` — 31 tests across 4 suites must pass (pubsub, decoder, handlers, blockscout)
 - Update `.env.example` when adding new environment variables
 - Update `AGENTS.md` when adding new contracts, models, or agent capabilities
+
+## Bug Fixes Applied (Phase 3)
+
+| Bug                                                                                                                    | File(s)                                                      | Fix                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **O1** — `StrategyOutcomeReported` had no `strategyId` filter, updated all executions                                  | `prisma/schema.prisma`, `src/sync/handlers/vault.ts`         | Added `strategyId String` field to `StrategyExecution` model; `StrategyExecuted` handler now stores `strategyId`; `StrategyOutcomeReported` handler filters `updateMany` by `strategyId` |
+| **O3** — Stale contract addresses (XCMExecutor, HyperExecutor, SwapRouter)                                             | `src/config/contracts.ts`                                    | Synced to canonical addresses from `obi-kit`; added `SwapQuoter` and `HydrationOmnipoolAdapter`                                                                                          |
+| **P1** — `asyncIterator` wrapped payload as `{ [TOPIC]: payload }` but resolvers had no `resolve()` to unwrap          | `src/graphql/pubsub.ts`, `src/graphql/resolvers.ts`          | `ObiPubSub` class exported; all 6 subscription resolvers now have `resolve: (payload) => payload[Topics.X]` to unwrap the iterator value before sending to the client                    |
+| **P2** — All 6 subscription resolvers missing `resolve()` function                                                     | `src/graphql/resolvers.ts`                                   | Added `resolve()` to all 6 resolvers (paired with P1 fix)                                                                                                                                |
+| **P3** — Iterator `return()` was not idempotent; pending `next()` promise not resolved on `return()`                   | `src/graphql/pubsub.ts`, `src/server.ts`                     | `return()` guards on `done` flag; pending `next()` promise resolved on `return()`; `useServer` `onComplete` callback added in `server.ts`                                                |
+| **P4** — `oracle.ts` never published to `Topics.ORACLE_UPDATED`; `router.ts` never published to `Topics.SWAP_EXECUTED` | `src/sync/handlers/oracle.ts`, `src/sync/handlers/router.ts` | Added `pubsub.publish(Topics.ORACLE_UPDATED, ...)` after `PriceUpdated` oracleState upsert; added `pubsub.publish(Topics.SWAP_EXECUTED, ...)` after `Swapped` swapExecution upsert       |
+
+### Testing (added in Phase 3)
+
+Test runner: **vitest** (`npm test` — 31 tests, 4 suites)
+
+| Suite      | File                      | What it tests                                                                                                                                     |
+| ---------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PubSub     | `test/pubsub.test.ts`     | publish/subscribe delivery, queue, topic isolation, `return()` idempotency, listener cleanup, pending `next()` resolution, `resolve()` unwrapping |
+| Decoder    | `test/decoder.test.ts`    | `decodeLog` / `decodeLogs` against real ABI fragments (Deposit, Swapped, null cases)                                                              |
+| Handlers   | `test/handlers.test.ts`   | All event handlers with mock Prisma — `strategyId` filter fix, `IntentExecuted`, oracle state, swap execution, unknown pool types                 |
+| Blockscout | `test/blockscout.test.ts` | `fetchLogs` with mocked `fetch` — single page, fromBlock filter, pagination stop, error handling, multi-page                                      |
