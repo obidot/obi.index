@@ -17,8 +17,8 @@ export const ADDRESSES = {
   XCMExecutor: "0x011b6FAf32370dCF92a452374FfCfCdbfA20278c" as Address,
   NativeAssetDOT: "0xE72453bD8d5ECF56ccdDeF949C8AE0Cea5A41E7d" as Address,
   NativeAssetUSDC: "0xAf233E9f2ED78022CAdEA58a84144ce6BcDFd63E" as Address,
-  // Phase 3–12 (2026-03-11)
-  SwapRouter: "0x0A85A1B0bb893cab3b5fad7312ac241e92C8Badf" as Address,
+  // Phase 3–17 (2026-03-11 → 2026-03-15)
+  SwapRouter: "0x60a72d1e20c5dc40Bb5a24394f0583d863201A3c" as Address,
   SwapQuoter: "0x81d7aCFEF474DA6c76eC1b5A05a137cB9f3A5Db1" as Address,
   HydrationOmnipoolAdapter:
     "0xF0E1c10f97446C032A86C9643258Bb26d6129933" as Address,

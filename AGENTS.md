@@ -199,12 +199,12 @@ All addresses are on **Polkadot Hub TestNet** (chain `420420417`).
 | KeeperOracle     | `0xf64d93DC125AC1B366532BBbA165615f6D566C7F` | 1     |
 | OracleRegistry   | `0x8b7C7345d6cF9de45f4aacC61F56F0241d47e88B` | 1     |
 | BifrostAdapter   | `0x265Cb785De0fF2e5BcebDEb53095aDCAE9175527` | 1     |
-| XCMExecutor      | `0xE8FDc9093395eA02017d5D66899F3E04CFF1CF64` | 2     |
+| XCMExecutor      | `0x011b6FAf32370dCF92a452374FfCfCdbfA20278c` | 9     |
 | NativeAssetDOT   | `0xE72453bD8d5ECF56ccdDeF949C8AE0Cea5A41E7d` | 2     |
 | NativeAssetUSDC  | `0xAf233E9f2ED78022CAdEA58a84144ce6BcDFd63E` | 2     |
-| SwapRouter       | `0xfbc3fEB4DA6f00049af278eC3ecaCAFF7f08DDbB` | 6     |
+| SwapRouter       | `0x60a72d1e20c5dc40Bb5a24394f0583d863201A3c` | 17    |
 | CrossChainRouter | `0xE2fFfb3B5C72f99811bC20D857035611bFCe5b5d` | 7     |
-| HyperExecutor    | `0x5d4695951B6639A6B4ef90B2D911C867aBbb2B61` | 7     |
+| HyperExecutor    | `0x62919Cb6416Cb919fC4A30c5707a7867Ca874ca6` | 10    |
 | ObidotVault      | `0x03473a95971Ba0496786a615e21b1e87bDFf0025` | 8     |
 
 **Not indexed (no events):** SwapQuoter (read-only), HydrationOmnipoolAdapter, AssetHubPairAdapter, BifrostDEXAdapter (adapter events route through SwapRouter).
