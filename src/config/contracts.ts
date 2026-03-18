@@ -25,7 +25,7 @@ export const ADDRESSES = {
   // Phase 7–9 (2026-03-12)
   HyperExecutor: "0x62919Cb6416Cb919fC4A30c5707a7867Ca874ca6" as Address,
   CrossChainRouter: "0xE2fFfb3B5C72f99811bC20D857035611bFCe5b5d" as Address,
-  // Phase 8 (2026-03-12)
+  // Phase 19 (2026-03-16, executeLocalSwap approval fix)
   ObidotVault: "0x03473a95971Ba0496786a615e21b1e87bDFf0025" as Address,
 } as const;
 
