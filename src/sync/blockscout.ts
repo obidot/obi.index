@@ -13,8 +13,10 @@ export interface BlockscoutLog {
   block_number: number;
   block_hash: string;
   transaction_hash: string;
-  log_index: number;
-  block_timestamp: string; // ISO 8601
+  /** Actual API field name is "index", not "log_index" */
+  index: number;
+  /** Not returned by the logs API — enriched after fetch via /blocks/{n} */
+  block_timestamp?: string; // ISO 8601
 }
 
 /** Paginated response from Blockscout */
@@ -37,6 +39,9 @@ interface BlockscoutLogsResponse {
  * @param maxPages - Safety limit on pagination (default 50)
  * @returns Array of raw Blockscout log entries
  */
+/** Milliseconds to back off after a 429 response */
+const RATE_LIMIT_BACKOFF_MS = 2_000;
+
 export async function fetchLogs(
   contractAddress: string,
   fromBlock: number = 0,
@@ -52,6 +57,20 @@ export async function fetchLogs(
 
     const response = await fetch(url);
     if (!response.ok) {
+      if (response.status === 429) {
+        // Rate limited — back off and retry once
+        const retryAfter = response.headers.get("Retry-After");
+        const backoffMs = retryAfter
+          ? Number(retryAfter) * 1000
+          : RATE_LIMIT_BACKOFF_MS;
+        logger.debug(
+          { status: 429, url, backoffMs },
+          "Blockscout rate limited — backing off",
+        );
+        await sleep(backoffMs);
+        // retry the same page
+        continue;
+      }
       logger.error(
         { status: response.status, url },
         "Blockscout API request failed",
@@ -77,12 +96,37 @@ export async function fetchLogs(
     page++;
   } while (nextPageParams && page < maxPages);
 
+  // Deduplicate by (transaction_hash, index) — Blockscout cursor-based pagination
+  // can return the same log on both sides of a page boundary.
+  const seen = new Set<string>();
+  const dedupedLogs = allLogs.filter((log) => {
+    const key = `${log.transaction_hash}:${log.index}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
   logger.info(
-    { contract: contractAddress, count: allLogs.length, pages: page },
+    {
+      contract: contractAddress,
+      count: dedupedLogs.length,
+      duplicates: allLogs.length - dedupedLogs.length,
+      pages: page,
+    },
     "Fetched logs from Blockscout",
   );
 
-  return allLogs;
+  // Enrich logs with block timestamps (not included in log API response)
+  if (dedupedLogs.length > 0) {
+    const uniqueBlocks = [...new Set(dedupedLogs.map((l) => l.block_number))];
+    const timestamps = await fetchBlockTimestamps(uniqueBlocks);
+    for (const log of dedupedLogs) {
+      const ts = timestamps.get(log.block_number);
+      if (ts) log.block_timestamp = ts;
+    }
+  }
+
+  return dedupedLogs;
 }
 
 /**
@@ -102,7 +146,30 @@ export async function fetchBlockTimestamp(
   }
 }
 
+/**
+ * Batch-fetch timestamps for multiple block numbers in parallel.
+ * Returns a Map<blockNumber, isoTimestamp>.
+ */
+export async function fetchBlockTimestamps(
+  blockNumbers: number[],
+): Promise<Map<number, string>> {
+  const entries = await Promise.all(
+    blockNumbers.map(async (n) => {
+      const ts = await fetchBlockTimestamp(n);
+      return [n, ts] as const;
+    }),
+  );
+  const result = new Map<number, string>();
+  for (const [n, ts] of entries) {
+    if (ts) result.set(n, ts);
+  }
+  return result;
+}
+
 // ── Internals ────────────────────────────────────────────
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 function buildUrl(
   address: string,

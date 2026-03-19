@@ -18,19 +18,20 @@ export async function handleVaultEvent(
   switch (eventName) {
     // ── ERC-4626 ───────────────────────────────────────
     case "Deposit":
-      await prisma.deposit.upsert({
-        where: { txHash_logIndex: { txHash, logIndex } },
-        create: {
-          txHash,
-          logIndex,
-          blockNumber,
-          timestamp,
-          sender: String(args.sender),
-          owner: String(args.owner),
-          assets: String(args.assets),
-          shares: String(args.shares),
-        },
-        update: {},
+      await prisma.deposit.createMany({
+        data: [
+          {
+            txHash,
+            logIndex,
+            blockNumber,
+            timestamp,
+            sender: String(args.sender),
+            owner: String(args.owner),
+            assets: String(args.assets),
+            shares: String(args.shares),
+          },
+        ],
+        skipDuplicates: true,
       });
       // Refresh VaultState from live RPC so totalAssets/totalSupply stay accurate
       await refreshVaultState(prisma, event.contractAddress, blockNumber);
@@ -53,20 +54,21 @@ export async function handleVaultEvent(
       break;
 
     case "Withdraw":
-      await prisma.withdrawal.upsert({
-        where: { txHash_logIndex: { txHash, logIndex } },
-        create: {
-          txHash,
-          logIndex,
-          blockNumber,
-          timestamp,
-          sender: String(args.sender),
-          receiver: String(args.receiver),
-          owner: String(args.owner),
-          assets: String(args.assets),
-          shares: String(args.shares),
-        },
-        update: {},
+      await prisma.withdrawal.createMany({
+        data: [
+          {
+            txHash,
+            logIndex,
+            blockNumber,
+            timestamp,
+            sender: String(args.sender),
+            receiver: String(args.receiver),
+            owner: String(args.owner),
+            assets: String(args.assets),
+            shares: String(args.shares),
+          },
+        ],
+        skipDuplicates: true,
       });
       // Refresh VaultState from live RPC after withdrawal
       await refreshVaultState(prisma, event.contractAddress, blockNumber);
@@ -90,19 +92,20 @@ export async function handleVaultEvent(
 
     // ── Withdrawal Queue ───────────────────────────────
     case "WithdrawalQueued":
-      await prisma.withdrawalRequest.upsert({
-        where: { txHash_logIndex: { txHash, logIndex } },
-        create: {
-          txHash,
-          logIndex,
-          blockNumber,
-          timestamp,
-          user: String(args.owner),
-          shares: String(args.shares),
-          requestId: Number(args.requestId),
-          fulfilled: false,
-        },
-        update: {},
+      await prisma.withdrawalRequest.createMany({
+        data: [
+          {
+            txHash,
+            logIndex,
+            blockNumber,
+            timestamp,
+            user: String(args.owner),
+            shares: String(args.shares),
+            requestId: Number(args.requestId),
+            fulfilled: false,
+          },
+        ],
+        skipDuplicates: true,
       });
       logger.info({ requestId: Number(args.requestId) }, "Withdrawal queued");
       break;
@@ -128,23 +131,24 @@ export async function handleVaultEvent(
 
     // ── Strategy ───────────────────────────────────────
     case "StrategyExecuted":
-      await prisma.strategyExecution.upsert({
-        where: { txHash_logIndex: { txHash, logIndex } },
-        create: {
-          txHash,
-          logIndex,
-          blockNumber,
-          timestamp,
-          strategyId: String(args.strategyId),
-          executor: String(args.strategist),
-          destination: "parachain",
-          targetChain: String(args.targetParachain),
-          protocol: String(args.targetProtocol),
-          amount: String(args.amount),
-          profit: "0",
-          success: true,
-        },
-        update: {},
+      await prisma.strategyExecution.createMany({
+        data: [
+          {
+            txHash,
+            logIndex,
+            blockNumber,
+            timestamp,
+            strategyId: String(args.strategyId),
+            executor: String(args.strategist),
+            destination: "parachain",
+            targetChain: String(args.targetParachain),
+            protocol: String(args.targetProtocol),
+            amount: String(args.amount),
+            profit: "0",
+            success: true,
+          },
+        ],
+        skipDuplicates: true,
       });
       logger.info({ strategyId: String(args.strategyId) }, "Strategy executed");
       break;
@@ -164,20 +168,21 @@ export async function handleVaultEvent(
 
     // ── Local Swap ─────────────────────────────────────
     case "LocalSwapExecuted":
-      await prisma.localSwap.upsert({
-        where: { txHash_logIndex: { txHash, logIndex } },
-        create: {
-          txHash,
-          logIndex,
-          blockNumber,
-          timestamp,
-          tokenIn: String(args.tokenIn),
-          tokenOut: String(args.tokenOut),
-          amountIn: String(args.amountIn),
-          amountOut: String(args.amountOut),
-          executor: String(args.strategist),
-        },
-        update: {},
+      await prisma.localSwap.createMany({
+        data: [
+          {
+            txHash,
+            logIndex,
+            blockNumber,
+            timestamp,
+            tokenIn: String(args.tokenIn),
+            tokenOut: String(args.tokenOut),
+            amountIn: String(args.amountIn),
+            amountOut: String(args.amountOut),
+            executor: String(args.strategist),
+          },
+        ],
+        skipDuplicates: true,
       });
       logger.info(
         { amountIn: String(args.amountIn), amountOut: String(args.amountOut) },
@@ -187,25 +192,26 @@ export async function handleVaultEvent(
 
     // ── Intent ─────────────────────────────────────────
     case "IntentExecuted":
-      await prisma.intentExecution.upsert({
-        where: { txHash_logIndex: { txHash, logIndex } },
-        create: {
-          txHash,
-          logIndex,
-          blockNumber,
-          timestamp,
-          solver: String(args.strategist),
-          intentHash: "",
-          tokenIn: "",
-          tokenOut: "",
-          amountIn: "0",
-          minAmountOut: "0",
-          destination: "unknown",
-          targetChain: "0",
-          deadline: timestamp,
-          nonce: Number(args.nonce),
-        },
-        update: {},
+      await prisma.intentExecution.createMany({
+        data: [
+          {
+            txHash,
+            logIndex,
+            blockNumber,
+            timestamp,
+            solver: String(args.strategist),
+            intentHash: "",
+            tokenIn: "",
+            tokenOut: "",
+            amountIn: "0",
+            minAmountOut: "0",
+            destination: "unknown",
+            targetChain: "0",
+            deadline: timestamp,
+            nonce: Number(args.nonce),
+          },
+        ],
+        skipDuplicates: true,
       });
       logger.info({ nonce: Number(args.nonce) }, "Intent executed");
       break;

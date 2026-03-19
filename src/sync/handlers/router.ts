@@ -6,11 +6,17 @@ import type { DecodedEvent } from "../decoder.js";
 import { pubsub, Topics } from "../../graphql/pubsub.js";
 import { logger } from "../../utils/logger.js";
 
-/** PoolType enum from ISwapRouter.sol */
+/** PoolType enum from ISwapRouter.sol (matches Phase 17 9-slot registry) */
 const POOL_TYPE_NAMES: Record<number, string> = {
   0: "HydrationOmnipool",
   1: "AssetHubPair",
   2: "BifrostDEX",
+  3: "UniswapV2",
+  4: "MockBridge",
+  5: "RelayTeleport",
+  6: "Karura",
+  7: "Moonbeam",
+  8: "Interlay",
 };
 
 export async function handleRouterEvent(
@@ -21,24 +27,27 @@ export async function handleRouterEvent(
 
   switch (eventName) {
     case "Swapped":
-      await prisma.swapExecution.upsert({
-        where: { txHash_logIndex: { txHash, logIndex } },
-        create: {
-          txHash,
-          logIndex,
-          blockNumber,
-          timestamp,
-          tokenIn: String(args.tokenIn),
-          tokenOut: String(args.tokenOut),
-          amountIn: String(args.amountIn),
-          amountOut: String(args.amountOut),
-          recipient: String(args.sender),
-          poolType:
-            POOL_TYPE_NAMES[Number(args.poolType)] ??
-            `unknown(${args.poolType})`,
-          hops: 1,
-        },
-        update: {},
+      // createMany with skipDuplicates generates `INSERT ... ON CONFLICT DO NOTHING`
+      // — truly atomic, cannot throw P2002 unlike upsert({ update: {} }).
+      await prisma.swapExecution.createMany({
+        data: [
+          {
+            txHash,
+            logIndex,
+            blockNumber,
+            timestamp,
+            tokenIn: String(args.tokenIn),
+            tokenOut: String(args.tokenOut),
+            amountIn: String(args.amountIn),
+            amountOut: String(args.amountOut),
+            recipient: String(args.sender),
+            poolType:
+              POOL_TYPE_NAMES[Number(args.poolType)] ??
+              `unknown(${args.poolType})`,
+            hops: 1,
+          },
+        ],
+        skipDuplicates: true,
       });
       logger.info(
         {

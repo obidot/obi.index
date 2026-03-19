@@ -16,19 +16,20 @@ export async function handleOracleEvent(
     // ── KeeperOracle ───────────────────────────────────
     case "PriceUpdated":
       // Historical record
-      await prisma.oracleUpdate.upsert({
-        where: { txHash_logIndex: { txHash, logIndex } },
-        create: {
-          txHash,
-          logIndex,
-          blockNumber,
-          timestamp,
-          feed: event.contractAddress,
-          price: String(args.answer),
-          roundId: Number(args.roundId),
-          updater: String(args.updater),
-        },
-        update: {},
+      await prisma.oracleUpdate.createMany({
+        data: [
+          {
+            txHash,
+            logIndex,
+            blockNumber,
+            timestamp,
+            feed: event.contractAddress,
+            price: String(args.answer),
+            roundId: Number(args.roundId),
+            updater: String(args.updater),
+          },
+        ],
+        skipDuplicates: true,
       });
 
       // Update current state

@@ -71,22 +71,23 @@ export async function handleBifrostEvent(
         7: "farm_claim",
       };
 
-      await prisma.bifrostStrategy.upsert({
-        where: { txHash_logIndex: { txHash, logIndex } },
-        create: {
-          txHash,
-          logIndex,
-          blockNumber,
-          timestamp,
-          strategyType:
-            BIFROST_STRATEGY_TYPES[Number(args.strategyType)] ??
-            `unknown(${args.strategyType})`,
-          tokenIn: "",
-          amount: String(args.amount),
-          xcmFee: "0",
-          caller: event.contractAddress,
-        },
-        update: {},
+      await prisma.bifrostStrategy.createMany({
+        data: [
+          {
+            txHash,
+            logIndex,
+            blockNumber,
+            timestamp,
+            strategyType:
+              BIFROST_STRATEGY_TYPES[Number(args.strategyType)] ??
+              `unknown(${args.strategyType})`,
+            tokenIn: "",
+            amount: String(args.amount),
+            xcmFee: "0",
+            caller: event.contractAddress,
+          },
+        ],
+        skipDuplicates: true,
       });
       logger.info(
         { strategyId: String(args.strategyId), type: args.strategyType },
