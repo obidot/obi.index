@@ -273,6 +273,75 @@ model BifrostStrategy {
   @@map("bifrost_strategies")
 }
 
+/// UniswapV2 Mint event — liquidity added to a pair
+model LpMint {
+  id          String   @id @default(cuid())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  pair        String   // LP pair address
+  sender      String   // address that triggered mint
+  amount0     String   // uint256
+  amount1     String   // uint256
+
+  @@unique([txHash, logIndex])
+  @@index([pair])
+  @@index([blockNumber])
+  @@map("lp_mints")
+}
+
+/// UniswapV2 Burn event — liquidity removed from a pair
+model LpBurn {
+  id          String   @id @default(cuid())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  pair        String   // LP pair address
+  sender      String
+  to          String
+  amount0     String   // uint256
+  amount1     String   // uint256
+
+  @@unique([txHash, logIndex])
+  @@index([pair])
+  @@index([blockNumber])
+  @@map("lp_burns")
+}
+
+/// UniswapV2 Sync event — reserve snapshot after each interaction
+model LpSync {
+  id          String   @id @default(cuid())
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  pair        String   // LP pair address
+  reserve0    String   // uint112 as string
+  reserve1    String   // uint112 as string
+
+  @@unique([txHash, logIndex])
+  @@index([pair])
+  @@index([blockNumber])
+  @@map("lp_syncs")
+}
+
+/// Latest reserve snapshot per LP pair (upserted on every Sync)
+model LpPoolState {
+  id              String   @id @default(cuid())
+  pair            String   @unique // LP pair address
+  token0          String   // address
+  token1          String   // address
+  reserve0        String   @default("0")
+  reserve1        String   @default("0")
+  totalSupply     String   @default("0")
+  updatedAtBlock  Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@map("lp_pool_state")
+}
+
 // ═══════════════════════════════════════════════════════════
 // INFRASTRUCTURE
 // ═══════════════════════════════════════════════════════════
