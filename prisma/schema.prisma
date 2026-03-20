@@ -1,5 +1,5 @@
 // ── Obidot Indexer — Prisma Schema ───────────────────────
-// 16 models: 4 state, 10 historical, 2 infrastructure
+// 20 models: 5 state, 13 historical, 2 infrastructure
 
 generator client {
   provider = "prisma-client-js"
@@ -69,6 +69,21 @@ model ParachainConfig {
   updatedAt   DateTime @updatedAt
 
   @@map("parachain_config")
+}
+
+/// Latest reserve snapshot per LP pair (upserted on every Sync)
+model LpPoolState {
+  id              String   @id @default(cuid())
+  pair            String   @unique // LP pair address
+  token0          String   // address
+  token1          String   // address
+  reserve0        String   @default("0")
+  reserve1        String   @default("0")
+  totalSupply     String   @default("0")
+  updatedAtBlock  Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@map("lp_pool_state")
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -299,8 +314,8 @@ model LpBurn {
   blockNumber Int
   timestamp   DateTime
   pair        String   // LP pair address
-  sender      String
-  to          String
+  sender      String   // address
+  to          String   // address
   amount0     String   // uint256
   amount1     String   // uint256
 
@@ -325,21 +340,6 @@ model LpSync {
   @@index([pair])
   @@index([blockNumber])
   @@map("lp_syncs")
-}
-
-/// Latest reserve snapshot per LP pair (upserted on every Sync)
-model LpPoolState {
-  id              String   @id @default(cuid())
-  pair            String   @unique // LP pair address
-  token0          String   // address
-  token1          String   // address
-  reserve0        String   @default("0")
-  reserve1        String   @default("0")
-  totalSupply     String   @default("0")
-  updatedAtBlock  Int      @default(0)
-  updatedAt       DateTime @updatedAt
-
-  @@map("lp_pool_state")
 }
 
 // ═══════════════════════════════════════════════════════════
