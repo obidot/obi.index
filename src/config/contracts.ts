@@ -27,6 +27,12 @@ export const ADDRESSES = {
   CrossChainRouter: "0xE2fFfb3B5C72f99811bC20D857035611bFCe5b5d" as Address,
   // Phase 19 (2026-03-16, executeLocalSwap approval fix)
   ObidotVault: "0x03473a95971Ba0496786a615e21b1e87bDFf0025" as Address,
+  // SP-1 liquidity provision (2026-03-20)
+  LiquidityPairDotTkb:   "0xDc1b4a27d44613aa5072Ca6edC20151D94e7f93A" as Address,
+  LiquidityPairDotUsdc:  "0x9576F7b40bC3a8Bb5d236Cd4bEBC29dC40AF0fa4" as Address,
+  LiquidityPairDotEth:   "0x4a0183BA79Ab7072240B5Fd8B6A1055E8e60aC83" as Address,
+  LiquidityPairUsdcEth:  "0x3FBa4A4db176201d3A3a5B25e7561274ceCb6ef5" as Address,
+  LiquidityPairTkbTka:   "0xd6F5C4b7b3911Db7D062D0457f8b3D4045C86d50" as Address,
 } as const;
 
 // ═══════════════════════════════════════════════════════════
@@ -630,6 +636,81 @@ export const NATIVE_ASSET_ABI = [
   },
 ] as const satisfies Abi;
 
+/** LiquidityPair — UniswapV2-compatible LP pair events + view functions */
+export const LP_PAIR_ABI = [
+  {
+    type: "event",
+    name: "Mint",
+    inputs: [
+      { name: "sender", type: "address", indexed: true },
+      { name: "amount0", type: "uint256", indexed: false },
+      { name: "amount1", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "Burn",
+    inputs: [
+      { name: "sender", type: "address", indexed: true },
+      { name: "amount0", type: "uint256", indexed: false },
+      { name: "amount1", type: "uint256", indexed: false },
+      { name: "to", type: "address", indexed: true },
+    ],
+  },
+  {
+    type: "event",
+    name: "Swap",
+    inputs: [
+      { name: "sender", type: "address", indexed: true },
+      { name: "amount0In", type: "uint256", indexed: false },
+      { name: "amount1In", type: "uint256", indexed: false },
+      { name: "amount0Out", type: "uint256", indexed: false },
+      { name: "amount1Out", type: "uint256", indexed: false },
+      { name: "to", type: "address", indexed: true },
+    ],
+  },
+  {
+    type: "event",
+    name: "Sync",
+    inputs: [
+      { name: "reserve0", type: "uint112", indexed: false },
+      { name: "reserve1", type: "uint112", indexed: false },
+    ],
+  },
+  {
+    type: "function",
+    name: "token0",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "token1",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "getReserves",
+    inputs: [],
+    outputs: [
+      { name: "_reserve0", type: "uint112" },
+      { name: "_reserve1", type: "uint112" },
+      { name: "_blockTimestampLast", type: "uint32" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "totalSupply",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const satisfies Abi;
+
 // ═══════════════════════════════════════════════════════════
 // CONTRACT REGISTRY — maps address → name + ABI for poller
 // ═══════════════════════════════════════════════════════════
@@ -687,4 +768,9 @@ export const CONTRACT_REGISTRY: ContractEntry[] = [
     address: ADDRESSES.NativeAssetUSDC,
     abi: NATIVE_ASSET_ABI,
   },
+  { name: "LiquidityPairDotTkb",  address: ADDRESSES.LiquidityPairDotTkb,  abi: LP_PAIR_ABI },
+  { name: "LiquidityPairDotUsdc", address: ADDRESSES.LiquidityPairDotUsdc, abi: LP_PAIR_ABI },
+  { name: "LiquidityPairDotEth",  address: ADDRESSES.LiquidityPairDotEth,  abi: LP_PAIR_ABI },
+  { name: "LiquidityPairUsdcEth", address: ADDRESSES.LiquidityPairUsdcEth, abi: LP_PAIR_ABI },
+  { name: "LiquidityPairTkbTka",  address: ADDRESSES.LiquidityPairTkbTka,  abi: LP_PAIR_ABI },
 ];
