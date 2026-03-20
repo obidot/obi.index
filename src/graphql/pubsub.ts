@@ -15,6 +15,8 @@ export const Topics = {
   INTENT_EXECUTED: "INTENT_EXECUTED",
   ORACLE_UPDATED: "ORACLE_UPDATED",
   SWAP_EXECUTED: "SWAP_EXECUTED",
+  LP_MINT: "LP_MINT",
+  LP_BURN: "LP_BURN",
 } as const;
 
 export type Topic = (typeof Topics)[keyof typeof Topics];
