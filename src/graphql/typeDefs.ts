@@ -221,6 +221,42 @@ export const typeDefs = `#graphql
     pendingRequests: [WithdrawalRequest!]!
   }
 
+  type LpMint {
+    id: String!
+    txHash: String!
+    logIndex: Int!
+    blockNumber: Int!
+    timestamp: String!
+    pair: String!
+    sender: String!
+    amount0: String!
+    amount1: String!
+  }
+
+  type LpBurn {
+    id: String!
+    txHash: String!
+    logIndex: Int!
+    blockNumber: Int!
+    timestamp: String!
+    pair: String!
+    sender: String!
+    to: String!
+    amount0: String!
+    amount1: String!
+  }
+
+  type LpPoolState {
+    pair: String!
+    token0: String!
+    token1: String!
+    reserve0: String!
+    reserve1: String!
+    totalSupply: String!
+    updatedAtBlock: Int!
+    updatedAt: String!
+  }
+
   # ═══════════════════════════════════════════════════════
   # QUERIES
   # ═══════════════════════════════════════════════════════
@@ -252,6 +288,12 @@ export const typeDefs = `#graphql
     # Infrastructure
     syncCursors: [SyncCursor!]!
     tokens: [Token!]!
+
+    # LP
+    lpPools: [LpPoolState!]!
+    lpPool(pair: String!): LpPoolState
+    lpMints(pair: String, limit: Int): [LpMint!]!
+    lpBurns(pair: String, limit: Int): [LpBurn!]!
   }
 
   # ═══════════════════════════════════════════════════════
@@ -276,5 +318,11 @@ export const typeDefs = `#graphql
 
     """Fires whenever a SwapRouter Swapped event is indexed."""
     swapExecuted: SwapExecution!
+
+    """Fires whenever a new LP Mint event is indexed."""
+    lpMint: LpMint!
+
+    """Fires whenever a new LP Burn event is indexed."""
+    lpBurn: LpBurn!
   }
 `;

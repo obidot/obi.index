@@ -260,6 +260,38 @@ export const resolvers = {
     tokens: async (_: unknown, __: unknown, { prisma }: Context) => {
       return prisma.token.findMany();
     },
+
+    // ── LP ─────────────────────────────────────────────
+    lpPools: async (_: unknown, __: unknown, { prisma }: Context) =>
+      prisma.lpPoolState.findMany({ orderBy: { updatedAtBlock: "desc" } }),
+
+    lpPool: async (
+      _: unknown,
+      { pair }: { pair: string },
+      { prisma }: Context,
+    ) => prisma.lpPoolState.findUnique({ where: { pair } }),
+
+    lpMints: async (
+      _: unknown,
+      { pair, limit }: { pair?: string; limit?: number },
+      { prisma }: Context,
+    ) =>
+      prisma.lpMint.findMany({
+        where: pair ? { pair } : undefined,
+        orderBy: { blockNumber: "desc" },
+        take: limit ?? 50,
+      }),
+
+    lpBurns: async (
+      _: unknown,
+      { pair, limit }: { pair?: string; limit?: number },
+      { prisma }: Context,
+    ) =>
+      prisma.lpBurn.findMany({
+        where: pair ? { pair } : undefined,
+        orderBy: { blockNumber: "desc" },
+        take: limit ?? 50,
+      }),
   },
 
   // ─────────────────────────────────────────────────────────────────────
@@ -296,6 +328,14 @@ export const resolvers = {
       subscribe: () => pubsub.asyncIterator(Topics.SWAP_EXECUTED),
       resolve: (payload: Record<string, unknown>) =>
         payload[Topics.SWAP_EXECUTED],
+    },
+    lpMint: {
+      subscribe: () => pubsub.asyncIterator(Topics.LP_MINT),
+      resolve: (payload: Record<string, unknown>) => payload[Topics.LP_MINT],
+    },
+    lpBurn: {
+      subscribe: () => pubsub.asyncIterator(Topics.LP_BURN),
+      resolve: (payload: Record<string, unknown>) => payload[Topics.LP_BURN],
     },
   },
 };
