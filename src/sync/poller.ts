@@ -1,9 +1,10 @@
-// ── Polling Loop ─────────────────────────────────────────
-// Polls Blockscout every 60s for new event logs across all contracts,
-// decodes them, dispatches to handlers, and updates sync cursors.
-
 import { PrismaClient } from "@prisma/client";
-import { POLL_INTERVAL_MS } from "../config/constants.js";
+import {
+  POLL_INTERVAL_MS,
+  RAPID_SYNC,
+  POLL_CONCURRENCY,
+  STATE_REFRESH_INTERVAL_MS,
+} from "../config/constants.js";
 import {
   CONTRACT_REGISTRY,
   ADDRESSES,
@@ -20,6 +21,8 @@ import {
   handleBifrostEvent,
 } from "./handlers/executor.js";
 import { handleRouterEvent } from "./handlers/router.js";
+import { handleLiquidityPairEvent } from "./handlers/liquidity.js";
+import { BlockWatcher } from "./watcher.js";
 import { logger } from "../utils/logger.js";
 
 // ── Handler Dispatch Map ─────────────────────────────────
@@ -38,6 +41,11 @@ const HANDLER_MAP: Record<string, EventHandler> = {
   XCMExecutor: handleExecutorEvent,
   HyperExecutor: handleExecutorEvent,
   SwapRouter: handleRouterEvent,
+  LiquidityPairDotTkb: handleLiquidityPairEvent,
+  LiquidityPairDotUsdc: handleLiquidityPairEvent,
+  LiquidityPairDotEth: handleLiquidityPairEvent,
+  LiquidityPairUsdcEth: handleLiquidityPairEvent,
+  LiquidityPairTkbTka: handleLiquidityPairEvent,
   // NativeAsset events (Transfer/Approval) are ERC-20 standard —
   // not indexed separately for now (too noisy). Can be added later.
 };
@@ -46,8 +54,13 @@ const HANDLER_MAP: Record<string, EventHandler> = {
 
 export class Poller {
   private prisma: PrismaClient;
-  private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private lastStateRefreshAt = 0;
+
+  // Rapid mode: driven by BlockWatcher (WS push or HTTP poll).
+  // Slow mode: fixed setInterval at POLL_INTERVAL_MS.
+  private watcher: BlockWatcher | null = null;
+  private slowTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(prisma: PrismaClient) {
     this.prisma = prisma;
@@ -55,27 +68,48 @@ export class Poller {
 
   /** Start the polling loop */
   start(): void {
-    if (this.timer) return;
+    if (this.watcher || this.slowTimer) return;
+
     logger.info(
-      { intervalMs: POLL_INTERVAL_MS, contracts: CONTRACT_REGISTRY.length },
+      {
+        rapidSync: RAPID_SYNC,
+        pollIntervalMs: POLL_INTERVAL_MS,
+        stateRefreshIntervalMs: STATE_REFRESH_INTERVAL_MS,
+        concurrency: POLL_CONCURRENCY,
+        contracts: CONTRACT_REGISTRY.length,
+      },
       "Starting poller",
     );
 
-    // Run immediately, then on interval
-    void this.poll();
-    this.timer = setInterval(() => void this.poll(), POLL_INTERVAL_MS);
+    if (RAPID_SYNC) {
+      // BlockWatcher tries WS first, falls back to HTTP polling.
+      // Each new-head event triggers a full Blockscout log fetch.
+      this.watcher = new BlockWatcher();
+      this.watcher.on("block", () => void this.poll());
+      this.watcher.start();
+      // Also run once immediately to catch up from the last cursor.
+      void this.poll();
+    } else {
+      // Slow mode: fixed interval, no head-check optimisation.
+      void this.poll();
+      this.slowTimer = setInterval(() => void this.poll(), POLL_INTERVAL_MS);
+    }
   }
 
   /** Stop the polling loop */
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
+    if (this.watcher) {
+      this.watcher.stop();
+      this.watcher = null;
+    }
+    if (this.slowTimer) {
+      clearInterval(this.slowTimer);
+      this.slowTimer = null;
     }
     logger.info("Poller stopped");
   }
 
-  /** Execute a single poll cycle */
+  /** Execute a single poll cycle — called on each new head (rapid) or on timer (slow). */
   async poll(): Promise<void> {
     if (this.running) {
       logger.warn("Previous poll still running — skipping");
@@ -86,15 +120,28 @@ export class Poller {
     const startTime = Date.now();
 
     try {
+      const now = Date.now();
       let totalEvents = 0;
 
-      for (const contract of CONTRACT_REGISTRY) {
-        const count = await this.pollContract(contract);
-        totalEvents += count;
+      // Poll contracts in bounded-concurrency batches.
+      for (let i = 0; i < CONTRACT_REGISTRY.length; i += POLL_CONCURRENCY) {
+        const batch = CONTRACT_REGISTRY.slice(i, i + POLL_CONCURRENCY);
+        const counts = await Promise.all(
+          batch.map((contract) => this.pollContract(contract)),
+        );
+        totalEvents += counts.reduce((sum, n) => sum + n, 0);
       }
 
-      // Refresh state snapshots via RPC after processing events
-      await this.refreshState();
+      // Refresh state snapshots via RPC after processing events.
+      // In rapid mode, refresh immediately when events are seen, or every STATE_REFRESH_INTERVAL_MS.
+      if (
+        !RAPID_SYNC ||
+        totalEvents > 0 ||
+        now - this.lastStateRefreshAt >= STATE_REFRESH_INTERVAL_MS
+      ) {
+        await this.refreshState();
+        this.lastStateRefreshAt = now;
+      }
 
       const elapsed = Date.now() - startTime;
       logger.info({ totalEvents, elapsedMs: elapsed }, "Poll cycle complete");
@@ -154,7 +201,7 @@ export class Poller {
       data: {
         lastBlock: maxBlock,
         lastTxHash: logs[logs.length - 1].transaction_hash,
-        lastLogIndex: logs[logs.length - 1].log_index,
+        lastLogIndex: logs[logs.length - 1].index,
       },
     });
 
