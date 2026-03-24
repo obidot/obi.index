@@ -48,7 +48,7 @@ Polkadot Hub TestNet (chain 420420417)
         │
         ├── StrategyEvaluator  → reads DB, finds idle capital / price moves
         ├── ArbitrageDetector  → scans swap_executions for cross-pool spreads
-        ├── LLMAnalyzer        → sends snapshot to LLM (OpenRouter/OpenAI/Anthropic)
+        ├── LLMAnalyzer        → sends snapshot to LLM (OpenRouter/OpenAI)
         ├── IntentBuilder      → builds UniversalIntent struct
         ├── IntentSigner       → signTypedData (EIP-712)
         └── TransactionExecutor→ sendTransaction → ObidotVault.executeIntent()
@@ -106,6 +106,12 @@ npm run docker:down
 | zod           | 3.x     | Schema validation                                  |
 | tsx           | 4.x     | TypeScript execution (dev + scripts)               |
 
+## LLM Provider Support
+
+- `LLM_PROVIDER=openrouter` — supported
+- `LLM_PROVIDER=openai` — supported
+- `LLM_PROVIDER=anthropic` — intentionally rejected at startup until a native Anthropic Messages API client exists
+
 ## Project Layout
 
 ```
@@ -151,7 +157,7 @@ obi.index/
     │   └── llm/
     │       ├── provider.ts     # LLMProvider interface + createLLMProvider() factory
     │       ├── openrouter.ts   # OpenRouter API provider
-    │       ├── openai.ts       # OpenAI-compatible provider (OpenAI, Anthropic, Azure)
+    │       ├── openai.ts       # OpenAI-compatible provider (OpenAI-compatible APIs only)
     │       └── analyzer.ts     # LLMAnalyzer — state snapshot → AnalysisResult JSON
     └── utils/
         └── logger.ts           # pino singleton (pino-pretty in dev)

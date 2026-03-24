@@ -23,40 +23,42 @@ vi.mock("../src/sync/rpc.js", () => ({
 
 // ── Mock Prisma builder ───────────────────────────────────
 
+type MockCreateMany = ReturnType<typeof vi.fn>;
 type MockUpsert = ReturnType<typeof vi.fn>;
 type MockUpdateMany = ReturnType<typeof vi.fn>;
 
 interface MockPrisma {
-  deposit: { upsert: MockUpsert };
-  withdrawal: { upsert: MockUpsert };
+  deposit: { createMany: MockCreateMany };
+  withdrawal: { createMany: MockCreateMany };
   vaultState: { upsert: MockUpsert };
-  strategyExecution: { upsert: MockUpsert; updateMany: MockUpdateMany };
-  withdrawalRequest: { upsert: MockUpsert; updateMany: MockUpdateMany };
-  localSwap: { upsert: MockUpsert };
-  intentExecution: { upsert: MockUpsert };
+  strategyExecution: { createMany: MockCreateMany; updateMany: MockUpdateMany };
+  withdrawalRequest: { createMany: MockCreateMany; updateMany: MockUpdateMany };
+  localSwap: { createMany: MockCreateMany };
+  intentExecution: { createMany: MockCreateMany };
   parachainConfig: { upsert: MockUpsert };
   protocolConfig: { upsert: MockUpsert };
-  oracleUpdate: { upsert: MockUpsert };
+  oracleUpdate: { createMany: MockCreateMany };
   oracleState: { upsert: MockUpsert; updateMany: MockUpdateMany };
-  swapExecution: { upsert: MockUpsert };
+  swapExecution: { createMany: MockCreateMany };
 }
 
 function makeMockPrisma(): MockPrisma {
+  const createMany = () => vi.fn().mockResolvedValue({ count: 1 });
   const upsert = () => vi.fn().mockResolvedValue({});
   const updateMany = () => vi.fn().mockResolvedValue({ count: 1 });
   return {
-    deposit: { upsert: upsert() },
-    withdrawal: { upsert: upsert() },
+    deposit: { createMany: createMany() },
+    withdrawal: { createMany: createMany() },
     vaultState: { upsert: upsert() },
-    strategyExecution: { upsert: upsert(), updateMany: updateMany() },
-    withdrawalRequest: { upsert: upsert(), updateMany: updateMany() },
-    localSwap: { upsert: upsert() },
-    intentExecution: { upsert: upsert() },
+    strategyExecution: { createMany: createMany(), updateMany: updateMany() },
+    withdrawalRequest: { createMany: createMany(), updateMany: updateMany() },
+    localSwap: { createMany: createMany() },
+    intentExecution: { createMany: createMany() },
     parachainConfig: { upsert: upsert() },
     protocolConfig: { upsert: upsert() },
-    oracleUpdate: { upsert: upsert() },
+    oracleUpdate: { createMany: createMany() },
     oracleState: { upsert: upsert(), updateMany: updateMany() },
-    swapExecution: { upsert: upsert() },
+    swapExecution: { createMany: createMany() },
   };
 }
 
@@ -86,19 +88,21 @@ describe("handleVaultEvent — Deposit", () => {
     prisma = makeMockPrisma();
   });
 
-  it("calls prisma.deposit.upsert with correct fields", async () => {
+  it("calls prisma.deposit.createMany with correct fields", async () => {
     const event = baseEvent({
       eventName: "Deposit",
       args: { sender: "0xAAA", owner: "0xBBB", assets: 1000n, shares: 990n },
     });
     await handleVaultEvent(prisma as never, event);
-    expect(prisma.deposit.upsert).toHaveBeenCalledOnce();
-    const call = prisma.deposit.upsert.mock.calls[0][0] as {
-      create: Record<string, unknown>;
+    expect(prisma.deposit.createMany).toHaveBeenCalledOnce();
+    const call = prisma.deposit.createMany.mock.calls[0][0] as {
+      data: Record<string, unknown>[];
+      skipDuplicates: boolean;
     };
-    expect(call.create.owner).toBe("0xBBB");
-    expect(call.create.assets).toBe("1000");
-    expect(call.create.shares).toBe("990");
+    expect(call.data[0].owner).toBe("0xBBB");
+    expect(call.data[0].assets).toBe("1000");
+    expect(call.data[0].shares).toBe("990");
+    expect(call.skipDuplicates).toBe(true);
   });
 
   it("also calls vaultState.upsert (RPC refresh)", async () => {
@@ -117,7 +121,7 @@ describe("handleVaultEvent — Withdraw", () => {
     prisma = makeMockPrisma();
   });
 
-  it("calls prisma.withdrawal.upsert with correct fields", async () => {
+  it("calls prisma.withdrawal.createMany with correct fields", async () => {
     const event = baseEvent({
       eventName: "Withdraw",
       args: {
@@ -129,12 +133,12 @@ describe("handleVaultEvent — Withdraw", () => {
       },
     });
     await handleVaultEvent(prisma as never, event);
-    expect(prisma.withdrawal.upsert).toHaveBeenCalledOnce();
-    const call = prisma.withdrawal.upsert.mock.calls[0][0] as {
-      create: Record<string, unknown>;
+    expect(prisma.withdrawal.createMany).toHaveBeenCalledOnce();
+    const call = prisma.withdrawal.createMany.mock.calls[0][0] as {
+      data: Record<string, unknown>[];
     };
-    expect(call.create.receiver).toBe("0xBBB");
-    expect(call.create.assets).toBe("500");
+    expect(call.data[0].receiver).toBe("0xBBB");
+    expect(call.data[0].assets).toBe("500");
   });
 });
 
@@ -157,12 +161,12 @@ describe("handleVaultEvent — StrategyExecuted", () => {
       },
     });
     await handleVaultEvent(prisma as never, event);
-    expect(prisma.strategyExecution.upsert).toHaveBeenCalledOnce();
-    const call = prisma.strategyExecution.upsert.mock.calls[0][0] as {
-      create: Record<string, unknown>;
+    expect(prisma.strategyExecution.createMany).toHaveBeenCalledOnce();
+    const call = prisma.strategyExecution.createMany.mock.calls[0][0] as {
+      data: Record<string, unknown>[];
     };
-    expect(call.create.strategyId).toBe("7");
-    expect(call.create.executor).toBe("0xSOLVER");
+    expect(call.data[0].strategyId).toBe("7");
+    expect(call.data[0].executor).toBe("0xSOLVER");
   });
 });
 
@@ -213,12 +217,12 @@ describe("handleVaultEvent — IntentExecuted", () => {
       args: { messageId: 42n, strategist: "0xSOLVER", nonce: 1n },
     });
     await handleVaultEvent(prisma as never, event);
-    expect(prisma.intentExecution.upsert).toHaveBeenCalledOnce();
-    const call = prisma.intentExecution.upsert.mock.calls[0][0] as {
-      create: Record<string, unknown>;
+    expect(prisma.intentExecution.createMany).toHaveBeenCalledOnce();
+    const call = prisma.intentExecution.createMany.mock.calls[0][0] as {
+      data: Record<string, unknown>[];
     };
-    expect(call.create.solver).toBe("0xSOLVER");
-    expect(call.create.nonce).toBe(1);
+    expect(call.data[0].solver).toBe("0xSOLVER");
+    expect(call.data[0].nonce).toBe(1);
   });
 });
 
@@ -232,7 +236,7 @@ describe("handleOracleEvent — PriceUpdated", () => {
     prisma = makeMockPrisma();
   });
 
-  it("upserts oracleUpdate and oracleState", async () => {
+  it("writes oracleUpdate history and upserts oracleState", async () => {
     const event = baseEvent({
       contractName: "KeeperOracle",
       contractAddress: "0xFEED",
@@ -245,7 +249,7 @@ describe("handleOracleEvent — PriceUpdated", () => {
       },
     });
     await handleOracleEvent(prisma as never, event);
-    expect(prisma.oracleUpdate.upsert).toHaveBeenCalledOnce();
+    expect(prisma.oracleUpdate.createMany).toHaveBeenCalledOnce();
     expect(prisma.oracleState.upsert).toHaveBeenCalledOnce();
 
     const stateCall = prisma.oracleState.upsert.mock.calls[0][0] as {
@@ -293,7 +297,7 @@ describe("handleRouterEvent — Swapped", () => {
     prisma = makeMockPrisma();
   });
 
-  it("upserts swapExecution with correct fields", async () => {
+  it("writes swapExecution with correct fields", async () => {
     const event = baseEvent({
       contractName: "SwapRouter",
       eventName: "Swapped",
@@ -307,14 +311,14 @@ describe("handleRouterEvent — Swapped", () => {
       },
     });
     await handleRouterEvent(prisma as never, event);
-    expect(prisma.swapExecution.upsert).toHaveBeenCalledOnce();
-    const call = prisma.swapExecution.upsert.mock.calls[0][0] as {
-      create: Record<string, unknown>;
+    expect(prisma.swapExecution.createMany).toHaveBeenCalledOnce();
+    const call = prisma.swapExecution.createMany.mock.calls[0][0] as {
+      data: Record<string, unknown>[];
     };
-    expect(call.create.amountIn).toBe("1000");
-    expect(call.create.amountOut).toBe("990");
-    expect(call.create.poolType).toBe("HydrationOmnipool");
-    expect(call.create.recipient).toBe("0xSENDER");
+    expect(call.data[0].amountIn).toBe("1000");
+    expect(call.data[0].amountOut).toBe("990");
+    expect(call.data[0].poolType).toBe("HydrationOmnipool");
+    expect(call.data[0].recipient).toBe("0xSENDER");
   });
 
   it("uses unknown(N) label for unrecognised pool types", async () => {
@@ -331,9 +335,9 @@ describe("handleRouterEvent — Swapped", () => {
       },
     });
     await handleRouterEvent(prisma as never, event);
-    const call = prisma.swapExecution.upsert.mock.calls[0][0] as {
-      create: Record<string, unknown>;
+    const call = prisma.swapExecution.createMany.mock.calls[0][0] as {
+      data: Record<string, unknown>[];
     };
-    expect(call.create.poolType).toBe("unknown(99)");
+    expect(call.data[0].poolType).toBe("unknown(99)");
   });
 });

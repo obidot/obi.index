@@ -14,25 +14,39 @@ function makeLog(blockNumber: number, logIndex: number = 0): BlockscoutLog {
     block_number: blockNumber,
     block_hash: "0xblockhash",
     transaction_hash: `0xtx${blockNumber}`,
-    log_index: logIndex,
-    block_timestamp: "2026-03-14T00:00:00.000Z",
+    index: logIndex,
   };
 }
 
 function mockFetch(
   pages: { items: BlockscoutLog[]; next_page_params: null | object }[],
-): void {
+): ReturnType<typeof vi.fn> {
   let callIndex = 0;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockImplementation(() => {
-      const page = pages[callIndex++] ?? { items: [], next_page_params: null };
+  const fetchMock = vi.fn().mockImplementation((input: string | URL) => {
+    const url = String(input);
+    if (url.includes("/blocks/")) {
+      const blockNumber = Number(url.split("/").pop());
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve(page),
+        json: () =>
+          Promise.resolve({
+            timestamp: `2026-03-14T00:00:${String(blockNumber % 60).padStart(2, "0")}.000Z`,
+          }),
       });
-    }),
+    }
+
+    const page = pages[callIndex++] ?? { items: [], next_page_params: null };
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(page),
+    });
+  });
+
+  vi.stubGlobal(
+    "fetch",
+    fetchMock,
   );
+  return fetchMock;
 }
 
 afterEach(() => {
@@ -44,12 +58,16 @@ afterEach(() => {
 describe("fetchLogs", () => {
   it("returns all logs on a single page", async () => {
     const logs = [makeLog(200), makeLog(201)];
-    mockFetch([{ items: logs, next_page_params: null }]);
+    const fetchMock = mockFetch([{ items: logs, next_page_params: null }]);
 
     const { fetchLogs } = await import("../src/sync/blockscout.js");
     const result = await fetchLogs("0x1234", 0);
     expect(result).toHaveLength(2);
     expect(result[0].block_number).toBe(200);
+    expect(result[0].block_timestamp).toBe("2026-03-14T00:00:20.000Z");
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes("/logs")),
+    ).toHaveLength(1);
   });
 
   it("filters out logs older than fromBlock", async () => {
@@ -74,14 +92,16 @@ describe("fetchLogs", () => {
       },
     };
     const page2 = { items: [makeLog(100)], next_page_params: null };
-    mockFetch([page1, page2]);
+    const fetchMock = mockFetch([page1, page2]);
 
     const { fetchLogs } = await import("../src/sync/blockscout.js");
     // page1's last item (150) < fromBlock (200) → should stop and NOT fetch page2
     const result = await fetchLogs("0x1234", 200);
     expect(result).toHaveLength(1);
     expect(result[0].block_number).toBe(500);
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes("/logs")),
+    ).toHaveLength(1);
   });
 
   it("returns empty array on API error (non-ok response)", async () => {
@@ -109,11 +129,13 @@ describe("fetchLogs", () => {
       items: [makeLog(580), makeLog(570)],
       next_page_params: null,
     };
-    mockFetch([page1, page2]);
+    const fetchMock = mockFetch([page1, page2]);
 
     const { fetchLogs } = await import("../src/sync/blockscout.js");
     const result = await fetchLogs("0x1234", 500);
     expect(result).toHaveLength(4);
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes("/logs")),
+    ).toHaveLength(2);
   });
 });

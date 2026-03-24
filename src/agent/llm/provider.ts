@@ -25,33 +25,34 @@ import { OpenRouterProvider } from "./openrouter.js";
 import { OpenAIProvider } from "./openai.js";
 import { logger } from "../../utils/logger.js";
 
-/** Create an LLM provider based on config */
-export function createLLMProvider(): LLMProvider {
-  if (!LLM_API_KEY) {
+export function createLLMProviderFromConfig(
+  provider: string,
+  apiKey: string,
+  model: string,
+): LLMProvider {
+  if (!apiKey) {
     logger.warn("No LLM_API_KEY set — agent LLM calls will fail");
   }
 
-  switch (LLM_PROVIDER) {
+  switch (provider) {
     case "openrouter":
-      return new OpenRouterProvider(LLM_API_KEY, LLM_MODEL);
+      return new OpenRouterProvider(apiKey, model);
     case "openai":
-      return new OpenAIProvider(
-        LLM_API_KEY,
-        LLM_MODEL,
-        "https://api.openai.com/v1",
-      );
+      return new OpenAIProvider(apiKey, model, "https://api.openai.com/v1");
     case "anthropic":
-      // Use OpenAI-compatible endpoint for Anthropic via proxy
-      return new OpenAIProvider(
-        LLM_API_KEY,
-        LLM_MODEL,
-        "https://api.anthropic.com/v1",
+      throw new Error(
+        "LLM_PROVIDER=anthropic is not supported yet. Use openrouter/openai or implement Anthropic's Messages API.",
       );
     default:
       logger.warn(
-        { provider: LLM_PROVIDER },
+        { provider },
         "Unknown LLM provider, defaulting to OpenRouter",
       );
-      return new OpenRouterProvider(LLM_API_KEY, LLM_MODEL);
+      return new OpenRouterProvider(apiKey, model);
   }
+}
+
+/** Create an LLM provider based on config */
+export function createLLMProvider(): LLMProvider {
+  return createLLMProviderFromConfig(LLM_PROVIDER, LLM_API_KEY, LLM_MODEL);
 }
