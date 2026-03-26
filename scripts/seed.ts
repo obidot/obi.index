@@ -4,6 +4,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
+import { type Address } from "viem";
 import { CONTRACT_REGISTRY, ADDRESSES } from "../src/config/contracts.js";
 import { fetchLogs } from "../src/sync/blockscout.js";
 import { decodeLogs } from "../src/sync/decoder.js";
@@ -29,6 +30,7 @@ const HANDLER_MAP: Record<string, EventHandler> = {
   ObidotVault: handleVaultEvent,
   KeeperOracle: handleOracleEvent,
   OracleRegistry: handleOracleEvent,
+  SwapRouter: handleRouterEvent,
   CrossChainRouter: handleCrossChainEvent,
   BifrostAdapter: handleBifrostEvent,
   XCMExecutor: handleExecutorEvent,
@@ -101,6 +103,20 @@ async function seed(): Promise<void> {
       address: ADDRESSES.TestDOT,
       symbol: "tDOT",
       name: "Test DOT",
+      decimals: 18,
+    },
+    {
+      // Phase 18 live UV2 pair token
+      address: "0x5298FDe9E288371ECA21db04Ac5Ddba00C1ea626" as Address,
+      symbol: "tUSDC",
+      name: "Test USDC",
+      decimals: 6,
+    },
+    {
+      // Phase 18 live UV2 pair token
+      address: "0xd92a5325fB3A56f5012F1EBD1bd37573d981144e" as Address,
+      symbol: "tETH",
+      name: "Test ETH",
       decimals: 18,
     },
     {

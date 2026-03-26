@@ -27,6 +27,7 @@ const polkadotHubTestnet = {
 } as const;
 
 let _client: PublicClient | null = null;
+const _warnedVaultFallbackReads = new Set<string>();
 
 /** Get or create the viem public client (singleton) */
 export function getClient(): PublicClient {
@@ -52,47 +53,54 @@ export async function readVaultState(): Promise<{
   const client = getClient();
   const address = ADDRESSES.ObidotVault;
 
-  const [
-    totalAssets,
-    totalSupply,
-    paused,
-    depositCap,
-    maxDailyLoss,
-    totalDeposited,
-    totalWithdrawn,
-  ] = await Promise.all([
-    client.readContract({
-      address,
-      abi: VAULT_ABI,
-      functionName: "totalAssets",
-    }),
-    client.readContract({
-      address,
-      abi: VAULT_ABI,
-      functionName: "totalSupply",
-    }),
-    client.readContract({ address, abi: VAULT_ABI, functionName: "paused" }),
-    client.readContract({
-      address,
-      abi: VAULT_ABI,
-      functionName: "depositCap",
-    }),
-    client.readContract({
-      address,
-      abi: VAULT_ABI,
-      functionName: "maxDailyLoss",
-    }),
-    client.readContract({
+  const [totalAssets, totalSupply, paused, depositCap, maxDailyLoss] =
+    await Promise.all([
+      client.readContract({
+        address,
+        abi: VAULT_ABI,
+        functionName: "totalAssets",
+      }),
+      client.readContract({
+        address,
+        abi: VAULT_ABI,
+        functionName: "totalSupply",
+      }),
+      client.readContract({ address, abi: VAULT_ABI, functionName: "paused" }),
+      client.readContract({
+        address,
+        abi: VAULT_ABI,
+        functionName: "depositCap",
+      }),
+      client.readContract({
+        address,
+        abi: VAULT_ABI,
+        functionName: "maxDailyLoss",
+      }),
+    ]);
+
+  // totalDeposited / totalWithdrawn may revert on this vault version — graceful fallback
+  let totalDeposited: bigint = 0n;
+  try {
+    totalDeposited = (await client.readContract({
       address,
       abi: VAULT_ABI,
       functionName: "totalDeposited",
-    }),
-    client.readContract({
+    })) as bigint;
+  } catch (error) {
+    logVaultReadFallback("totalDeposited", address, error);
+  }
+
+  // totalWithdrawn may revert on-chain — graceful fallback to 0n
+  let totalWithdrawn: bigint = 0n;
+  try {
+    totalWithdrawn = (await client.readContract({
       address,
       abi: VAULT_ABI,
       functionName: "totalWithdrawn",
-    }),
-  ]);
+    })) as bigint;
+  } catch (error) {
+    logVaultReadFallback("totalWithdrawn", address, error);
+  }
 
   logger.debug(
     {
@@ -181,4 +189,35 @@ export async function getBlockNumber(): Promise<number> {
   const client = getClient();
   const blockNumber = await client.getBlockNumber();
   return Number(blockNumber);
+}
+
+function logVaultReadFallback(
+  fn: "totalDeposited" | "totalWithdrawn",
+  address: Address,
+  error: unknown,
+): void {
+  const key = `${address}:${fn}`;
+  const reason = extractErrorReason(error);
+
+  // Warn once per function/address to avoid log spam in poller loop.
+  if (!_warnedVaultFallbackReads.has(key)) {
+    _warnedVaultFallbackReads.add(key);
+    logger.warn(
+      { address, functionName: fn, reason },
+      `${fn}() reverted — defaulting to 0 (repeated warnings suppressed)`,
+    );
+  }
+}
+
+function extractErrorReason(error: unknown): string {
+  if (error && typeof error === "object") {
+    const e = error as { shortMessage?: unknown; message?: unknown };
+    if (typeof e.shortMessage === "string") {
+      return e.shortMessage.split("\n")[0] ?? e.shortMessage;
+    }
+    if (typeof e.message === "string") {
+      return e.message.split("\n")[0] ?? e.message;
+    }
+  }
+  return "execution reverted";
 }

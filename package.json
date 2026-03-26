@@ -18,6 +18,9 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "seed": "tsx scripts/seed.ts",
+    "indexer": "tsx scripts/run-indexer.ts",
+    "check-sync": "tsx scripts/check-sync.ts",
+    "e2e-test": "tsx scripts/e2e-test.ts",
     "agent": "tsx src/agent/index.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"

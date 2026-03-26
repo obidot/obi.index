@@ -46,8 +46,10 @@ export function decodeLog(
       args: (decoded.args ?? {}) as Record<string, unknown>,
       blockNumber: log.block_number,
       txHash: log.transaction_hash,
-      logIndex: log.log_index,
-      timestamp: new Date(log.block_timestamp),
+      logIndex: log.index,
+      timestamp: log.block_timestamp
+        ? new Date(log.block_timestamp)
+        : new Date(),
     };
   } catch {
     // Log doesn't match any event in this ABI — expected for
