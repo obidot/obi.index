@@ -2,6 +2,19 @@
 
 import type { PrismaClient } from "@prisma/client";
 import { pubsub, Topics } from "./pubsub.js";
+import {
+  buildPoolAnalytics,
+  buildProtocolStats,
+  buildTopRoutes,
+  filterSwapsForPair,
+} from "./analytics.js";
+import {
+  listCrossChainPipelines,
+  normalizeIdentifier,
+  resolveCrossChainPipeline,
+} from "./crossChain.js";
+import { buildPairId } from "../analytics/pairs.js";
+import { buildHourlyPriceHistory } from "./priceHistory.js";
 
 interface Context {
   prisma: PrismaClient;
@@ -18,6 +31,19 @@ const MAX_LIMIT = 500;
 function clampLimit(limit?: number): number {
   const l = limit ?? DEFAULT_LIMIT;
   return Math.min(Math.max(1, l), MAX_LIMIT);
+}
+
+async function* filterAsyncIterator<T>(
+  iterator: AsyncIterator<{ [key: string]: T }>,
+  predicate: (value: { [key: string]: T }) => boolean,
+): AsyncGenerator<{ [key: string]: T }> {
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) return;
+    if (predicate(next.value)) {
+      yield next.value;
+    }
+  }
 }
 
 export const resolvers = {
@@ -162,16 +188,47 @@ export const resolvers = {
 
     crossChainDispatches: async (
       _: unknown,
-      args: PaginationArgs & { status?: string },
+      args: PaginationArgs & {
+        status?: string;
+        sender?: string;
+        txHash?: string;
+        commitment?: string;
+        messageType?: string;
+      },
       { prisma }: Context,
     ) => {
       return prisma.crossChainDispatch.findMany({
-        where: args.status ? { status: args.status } : undefined,
-        orderBy: { blockNumber: "desc" },
+        where: {
+          ...(args.status ? { status: args.status } : {}),
+          ...(args.sender
+            ? { sender: { equals: args.sender, mode: "insensitive" } }
+            : {}),
+          ...(args.txHash ? { txHash: args.txHash } : {}),
+          ...(args.commitment ? { commitment: args.commitment } : {}),
+          ...(args.messageType ? { messageType: args.messageType } : {}),
+        },
+        orderBy: [{ blockNumber: "desc" }, { logIndex: "desc" }],
         take: clampLimit(args.limit),
         skip: args.offset ?? 0,
       });
     },
+
+    crossChainPipeline: async (
+      _: unknown,
+      args: { intentId: string },
+      { prisma }: Context,
+    ) => resolveCrossChainPipeline(prisma, args.intentId),
+
+    crossChainPipelines: async (
+      _: unknown,
+      args: { limit?: number; sender?: string; status?: string },
+      { prisma }: Context,
+    ) =>
+      listCrossChainPipelines(prisma, {
+        limit: clampLimit(args.limit),
+        sender: args.sender,
+        status: args.status,
+      }),
 
     bifrostStrategies: async (
       _: unknown,
@@ -261,6 +318,210 @@ export const resolvers = {
       return prisma.token.findMany();
     },
 
+    protocolStats: async (_: unknown, __: unknown, { prisma }: Context) => {
+      const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+      const [tokens, oracleStates, vaultState, swaps24h, swaps7d, totalSwaps] =
+        await Promise.all([
+          prisma.token.findMany({
+            select: { address: true, symbol: true, decimals: true },
+          }),
+          prisma.oracleState.findMany({
+            select: { asset: true, price: true, decimals: true },
+          }),
+          prisma.vaultState.findFirst({
+            select: { totalAssets: true },
+          }),
+          prisma.swapExecution.findMany({
+            where: { timestamp: { gte: since24h } },
+            select: {
+              tokenIn: true,
+              tokenOut: true,
+              amountIn: true,
+              amountOut: true,
+              recipient: true,
+              poolType: true,
+              hops: true,
+              timestamp: true,
+            },
+          }),
+          prisma.swapExecution.findMany({
+            where: { timestamp: { gte: since7d } },
+            select: {
+              tokenIn: true,
+              tokenOut: true,
+              amountIn: true,
+              amountOut: true,
+              recipient: true,
+              poolType: true,
+              hops: true,
+              timestamp: true,
+            },
+          }),
+          prisma.swapExecution.count(),
+        ]);
+
+      return buildProtocolStats({
+        tokens,
+        oracleStates,
+        swaps24h,
+        swaps7d,
+        totalSwaps,
+        vaultState,
+      });
+    },
+
+    topRoutes: async (
+      _: unknown,
+      args: { limit?: number },
+      { prisma }: Context,
+    ) => {
+      const limit = Math.min(Math.max(1, args.limit ?? 10), 25);
+      const [tokens, oracleStates, routes] = await Promise.all([
+        prisma.token.findMany({
+          select: { address: true, symbol: true, decimals: true },
+        }),
+        prisma.oracleState.findMany({
+          select: { asset: true, price: true, decimals: true },
+        }),
+        prisma.$queryRaw<
+          Array<{
+            tokenIn: string;
+            tokenOut: string;
+            poolType: string;
+            hops: number;
+            swapCount: number;
+            amountInTotal: string;
+            amountOutTotal: string;
+            lastSwapAt: Date;
+          }>
+        >`
+          SELECT
+            "tokenIn",
+            "tokenOut",
+            "poolType",
+            "hops",
+            COUNT(*)::int AS "swapCount",
+            SUM(("amountIn")::numeric)::text AS "amountInTotal",
+            SUM(("amountOut")::numeric)::text AS "amountOutTotal",
+            MAX("timestamp") AS "lastSwapAt"
+          FROM "swap_executions"
+          GROUP BY "tokenIn", "tokenOut", "poolType", "hops"
+          ORDER BY COUNT(*) DESC, MAX("timestamp") DESC
+          LIMIT ${limit}
+        `,
+      ]);
+
+      return buildTopRoutes({ routes, tokens, oracleStates });
+    },
+
+    poolAnalytics: async (
+      _: unknown,
+      args: { pair: string; window: string },
+      { prisma }: Context,
+    ) => {
+      const [tokens, oracleStates, swaps] = await Promise.all([
+        prisma.token.findMany({
+          select: { address: true, symbol: true, decimals: true },
+        }),
+        prisma.oracleState.findMany({
+          select: { asset: true, price: true, decimals: true },
+        }),
+        prisma.swapExecution.findMany({
+          orderBy: [
+            { timestamp: "asc" },
+            { blockNumber: "asc" },
+            { logIndex: "asc" },
+          ],
+          select: {
+            tokenIn: true,
+            tokenOut: true,
+            amountIn: true,
+            amountOut: true,
+            recipient: true,
+            poolType: true,
+            hops: true,
+            timestamp: true,
+            blockNumber: true,
+            logIndex: true,
+          },
+        }),
+      ]);
+
+      const pairSwaps = filterSwapsForPair({
+        swaps,
+        pair: args.pair,
+        tokens,
+        window: args.window,
+      });
+
+      return buildPoolAnalytics({
+        pair: args.pair,
+        window: args.window,
+        tokens,
+        oracleStates,
+        swaps: pairSwaps,
+      });
+    },
+
+    priceHistory: async (
+      _: unknown,
+      args: { tokenIn: string; tokenOut: string; from: number; to: number },
+      { prisma }: Context,
+    ) => {
+      if (args.from >= args.to) return [];
+
+      // Cap the query window to 90 days to prevent unbounded Prisma result sets.
+      const MAX_RANGE_SECONDS = 90 * 24 * 60 * 60;
+      if (args.to - args.from > MAX_RANGE_SECONDS) {
+        throw new Error(
+          "priceHistory: time range exceeds maximum of 90 days",
+        );
+      }
+
+      const [tokens, swaps] = await Promise.all([
+        prisma.token.findMany(),
+        prisma.priceHistoryPoint.findMany({
+          where: {
+            pairId: buildPairId(args.tokenIn, args.tokenOut),
+            timestamp: {
+              gte: new Date(args.from * 1000),
+              lt: new Date(args.to * 1000),
+            },
+          },
+          orderBy: [
+            { timestamp: "asc" },
+            { blockNumber: "asc" },
+            { logIndex: "asc" },
+          ],
+          select: {
+            tokenIn: true,
+            tokenOut: true,
+            amountIn: true,
+            amountOut: true,
+            timestamp: true,
+            blockNumber: true,
+            logIndex: true,
+          },
+        }),
+      ]);
+
+      const tokenMap = new Map(
+        tokens.map((token) => [token.address.toLowerCase(), token]),
+      );
+
+      return buildHourlyPriceHistory({
+        tokenIn: args.tokenIn,
+        tokenOut: args.tokenOut,
+        tokenInDecimals: tokenMap.get(args.tokenIn.toLowerCase())?.decimals,
+        tokenOutDecimals: tokenMap.get(args.tokenOut.toLowerCase())?.decimals,
+        from: args.from,
+        to: args.to,
+        swaps,
+      });
+    },
+
     // ── LP ─────────────────────────────────────────────
     lpPools: async (_: unknown, __: unknown, { prisma }: Context) =>
       prisma.lpPoolState.findMany({ orderBy: { updatedAtBlock: "desc" } }),
@@ -328,6 +589,26 @@ export const resolvers = {
       subscribe: () => pubsub.asyncIterator(Topics.SWAP_EXECUTED),
       resolve: (payload: Record<string, unknown>) =>
         payload[Topics.SWAP_EXECUTED],
+    },
+    crossChainStatus: {
+      subscribe: (_: unknown, args: { txHash: string }) =>
+        filterAsyncIterator(
+          pubsub.asyncIterator<{ originTxHash: string }>(
+            Topics.CROSS_CHAIN_STATUS,
+          ),
+          (payload) =>
+            normalizeIdentifier(payload[Topics.CROSS_CHAIN_STATUS]?.originTxHash) ===
+            normalizeIdentifier(args.txHash),
+        ),
+      resolve: async (
+        payload: Record<string, { originTxHash: string }>,
+        _args: { txHash: string },
+        { prisma }: Context,
+      ) =>
+        resolveCrossChainPipeline(
+          prisma,
+          payload[Topics.CROSS_CHAIN_STATUS]?.originTxHash ?? "",
+        ),
     },
     lpMint: {
       subscribe: () => pubsub.asyncIterator(Topics.LP_MINT),

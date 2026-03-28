@@ -19,15 +19,38 @@ export interface BlockscoutLog {
   block_timestamp?: string; // ISO 8601
 }
 
+interface BlockscoutLogsNextPageParams {
+  block_number: number;
+  index?: number;
+  transaction_index?: number;
+  log_index?: number;
+  items_count: number;
+}
+
 /** Paginated response from Blockscout */
 interface BlockscoutLogsResponse {
   items: BlockscoutLog[];
-  next_page_params: {
-    block_number: number;
-    transaction_index: number;
-    log_index: number;
-    items_count: number;
-  } | null;
+  next_page_params: BlockscoutLogsNextPageParams | null;
+}
+
+export interface BlockscoutBlock {
+  hash: string;
+  height: number;
+  parent_hash: string;
+  timestamp: string;
+}
+
+interface BlockscoutTransactionResponse {
+  from: { hash: string } | null;
+}
+
+export interface BlockscoutFetchStatus {
+  lastSuccessAt: number | null;
+  lastFailureAt: number | null;
+  lastError: string | null;
+  consecutiveFailures: number;
+  lastStatusCode: number | null;
+  lastRetryCount: number;
 }
 
 /**
@@ -41,6 +64,18 @@ interface BlockscoutLogsResponse {
  */
 /** Milliseconds to back off after a 429 response */
 const RATE_LIMIT_BACKOFF_MS = 2_000;
+const RETRY_BASE_MS = 1_000;
+const MAX_FETCH_RETRIES = 3;
+
+const blockscoutFetchStatus: BlockscoutFetchStatus = {
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastError: null,
+  consecutiveFailures: 0,
+  lastStatusCode: null,
+  lastRetryCount: 0,
+};
+const transactionSenderCache = new Map<string, string | null>();
 
 export async function fetchLogs(
   contractAddress: string,
@@ -55,26 +90,8 @@ export async function fetchLogs(
     const url = buildUrl(contractAddress, nextPageParams);
     logger.debug({ url, page }, "Fetching Blockscout logs");
 
-    const response = await fetch(url);
-    if (!response.ok) {
-      if (response.status === 429) {
-        // Rate limited — back off and retry once
-        const retryAfter = response.headers.get("Retry-After");
-        const backoffMs = retryAfter
-          ? Number(retryAfter) * 1000
-          : RATE_LIMIT_BACKOFF_MS;
-        logger.debug(
-          { status: 429, url, backoffMs },
-          "Blockscout rate limited — backing off",
-        );
-        await sleep(backoffMs);
-        // retry the same page
-        continue;
-      }
-      logger.error(
-        { status: response.status, url },
-        "Blockscout API request failed",
-      );
+    const response = await fetchWithRetry(url);
+    if (!response) {
       break;
     }
 
@@ -129,6 +146,40 @@ export async function fetchLogs(
   return dedupedLogs;
 }
 
+export function getBlockscoutFetchStatus(): BlockscoutFetchStatus {
+  return { ...blockscoutFetchStatus };
+}
+
+export async function fetchTransactionSender(
+  txHash: string,
+): Promise<string | null> {
+  const normalizedTxHash = txHash.toLowerCase();
+  if (transactionSenderCache.has(normalizedTxHash)) {
+    return transactionSenderCache.get(normalizedTxHash) ?? null;
+  }
+
+  const url = `${BLOCKSCOUT_URL}/api/v2/transactions/${txHash}`;
+  const response = await fetchWithRetry(url);
+  if (!response) {
+    transactionSenderCache.set(normalizedTxHash, null);
+    return null;
+  }
+
+  const data = (await response.json()) as BlockscoutTransactionResponse;
+  const sender = data.from?.hash ?? null;
+  transactionSenderCache.set(normalizedTxHash, sender);
+  return sender;
+}
+
+export async function fetchBlock(
+  blockNumberOrHash: number | string,
+): Promise<BlockscoutBlock | null> {
+  const url = `${BLOCKSCOUT_URL}/api/v2/blocks/${blockNumberOrHash}`;
+  const response = await fetchWithRetry(url);
+  if (!response) return null;
+  return (await response.json()) as BlockscoutBlock;
+}
+
 /**
  * Fetch a single block's timestamp from Blockscout.
  */
@@ -171,18 +222,116 @@ export async function fetchBlockTimestamps(
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+async function fetchWithRetry(url: string): Promise<Response | null> {
+  for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        recordFetchSuccess(response.status, attempt);
+        return response;
+      }
+
+      const shouldRetry =
+        (response.status === 429 || response.status >= 500) &&
+        attempt < MAX_FETCH_RETRIES;
+      if (shouldRetry) {
+        const retryAfterHeader =
+          typeof response.headers?.get === "function"
+            ? response.headers.get("Retry-After")
+            : null;
+        const backoffMs = getRetryDelay(
+          attempt,
+          retryAfterHeader,
+        );
+        logger.warn(
+          { status: response.status, url, attempt: attempt + 1, backoffMs },
+          "Blockscout request failed — retrying",
+        );
+        await sleep(backoffMs);
+        continue;
+      }
+
+      const errorMessage = `Blockscout API request failed with status ${response.status}`;
+      recordFetchFailure(response.status, attempt, errorMessage);
+      logger.error({ status: response.status, url }, errorMessage);
+      return null;
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      if (attempt < MAX_FETCH_RETRIES) {
+        const backoffMs = getRetryDelay(attempt, null);
+        logger.warn(
+          { error: errorMessage, url, attempt: attempt + 1, backoffMs },
+          "Blockscout request threw — retrying",
+        );
+        await sleep(backoffMs);
+        continue;
+      }
+
+      recordFetchFailure(null, attempt, errorMessage);
+      logger.error({ error: errorMessage, url }, "Blockscout request failed");
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function getRetryDelay(
+  attempt: number,
+  retryAfterHeader: string | null,
+): number {
+  if (retryAfterHeader) {
+    const retryAfterSeconds = Number(retryAfterHeader);
+    if (!Number.isNaN(retryAfterSeconds) && retryAfterSeconds > 0) {
+      return retryAfterSeconds * 1000;
+    }
+  }
+
+  return Math.max(RATE_LIMIT_BACKOFF_MS, RETRY_BASE_MS * 2 ** attempt);
+}
+
+function recordFetchSuccess(statusCode: number, retryCount: number): void {
+  blockscoutFetchStatus.lastSuccessAt = Date.now();
+  blockscoutFetchStatus.lastError = null;
+  blockscoutFetchStatus.consecutiveFailures = 0;
+  blockscoutFetchStatus.lastStatusCode = statusCode;
+  blockscoutFetchStatus.lastRetryCount = retryCount;
+}
+
+function recordFetchFailure(
+  statusCode: number | null,
+  retryCount: number,
+  errorMessage: string,
+): void {
+  blockscoutFetchStatus.lastFailureAt = Date.now();
+  blockscoutFetchStatus.lastError = errorMessage;
+  blockscoutFetchStatus.consecutiveFailures += 1;
+  blockscoutFetchStatus.lastStatusCode = statusCode;
+  blockscoutFetchStatus.lastRetryCount = retryCount;
+}
+
 function buildUrl(
   address: string,
-  pageParams: BlockscoutLogsResponse["next_page_params"],
+  pageParams: BlockscoutLogsNextPageParams | null,
 ): string {
   const base = `${BLOCKSCOUT_URL}/api/v2/addresses/${address}/logs`;
   if (!pageParams) return base;
 
-  const params = new URLSearchParams({
-    block_number: String(pageParams.block_number),
-    transaction_index: String(pageParams.transaction_index),
-    log_index: String(pageParams.log_index),
-    items_count: String(pageParams.items_count),
-  });
+  const params = new URLSearchParams();
+  params.set("block_number", String(pageParams.block_number));
+  params.set("items_count", String(pageParams.items_count));
+
+  if (pageParams.index !== undefined) {
+    params.set("index", String(pageParams.index));
+  } else {
+    if (pageParams.transaction_index !== undefined) {
+      params.set("transaction_index", String(pageParams.transaction_index));
+    }
+    if (pageParams.log_index !== undefined) {
+      params.set("log_index", String(pageParams.log_index));
+    }
+  }
+
   return `${base}?${params.toString()}`;
 }

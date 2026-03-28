@@ -15,6 +15,7 @@ export const ADDRESSES = {
   BifrostAdapter: "0x265Cb785De0fF2e5BcebDEb53095aDCAE9175527" as Address,
   // Phase 2 (2026-03-04)
   XCMExecutor: "0x011b6FAf32370dCF92a452374FfCfCdbfA20278c" as Address,
+  XcmPrecompile: "0x00000000000000000000000000000000000a0000" as Address,
   NativeAssetDOT: "0xE72453bD8d5ECF56ccdDeF949C8AE0Cea5A41E7d" as Address,
   NativeAssetUSDC: "0xAf233E9f2ED78022CAdEA58a84144ce6BcDFd63E" as Address,
   // Phase 3–17 (2026-03-11 → 2026-03-15)
@@ -25,6 +26,7 @@ export const ADDRESSES = {
   // Phase 7–9 (2026-03-12)
   HyperExecutor: "0x62919Cb6416Cb919fC4A30c5707a7867Ca874ca6" as Address,
   CrossChainRouter: "0xE2fFfb3B5C72f99811bC20D857035611bFCe5b5d" as Address,
+  IsmpHost: "0xbb26e04A71e7c12093e82b83BA310163Eac186fa" as Address,
   // Phase 19 (2026-03-16, executeLocalSwap approval fix)
   ObidotVault: "0x03473a95971Ba0496786a615e21b1e87bDFf0025" as Address,
   // SP-1 liquidity provision (2026-03-20)
@@ -583,11 +585,81 @@ export const HYPER_EXECUTOR_ABI = [
   },
   {
     type: "event",
+    name: "Committed",
+    inputs: [
+      { name: "messageId", type: "uint64", indexed: true },
+      { name: "commitment", type: "bytes32", indexed: true },
+    ],
+  },
+  {
+    type: "event",
     name: "ChainRegistered",
     inputs: [
       { name: "chainIndex", type: "uint8", indexed: true },
       { name: "chainId", type: "bytes", indexed: false },
       { name: "moduleAddress", type: "bytes", indexed: false },
+    ],
+  },
+] as const satisfies Abi;
+
+/**
+ * Hyperbridge ISMP host events confirmed in the local repo scripts/docs.
+ *
+ * Note: the plan originally referenced `GetRequestHandled`, but the checked-in
+ * contract-side operational scripts for the currently deployed host surfaces
+ * only provide `PostRequestEvent`, `PostRequestHandled`,
+ * `PostResponseHandled`, and `StateMachineUpdated`.
+ */
+export const ISMP_HOST_ABI = [
+  {
+    type: "event",
+    name: "PostRequestEvent",
+    inputs: [
+      { name: "source", type: "string", indexed: false },
+      { name: "dest", type: "string", indexed: false },
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "bytes", indexed: false },
+      { name: "nonce", type: "uint256", indexed: false },
+      { name: "timeoutTimestamp", type: "uint256", indexed: false },
+      { name: "body", type: "bytes", indexed: false },
+      { name: "fee", type: "uint256", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "PostRequestHandled",
+    inputs: [
+      { name: "commitment", type: "bytes32", indexed: true },
+      { name: "relayer", type: "address", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "PostResponseHandled",
+    inputs: [
+      { name: "commitment", type: "bytes32", indexed: true },
+      { name: "relayer", type: "address", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "StateMachineUpdated",
+    inputs: [
+      { name: "stateMachineId", type: "string", indexed: false },
+      { name: "height", type: "uint256", indexed: false },
+    ],
+  },
+] as const satisfies Abi;
+
+/** Polkadot Hub XCM precompile event surface */
+export const XCM_PRECOMPILE_ABI = [
+  {
+    type: "event",
+    name: "XcmSent",
+    inputs: [
+      { name: "sender", type: "address", indexed: true },
+      { name: "dest", type: "bytes", indexed: false },
+      { name: "message", type: "bytes", indexed: false },
     ],
   },
 ] as const satisfies Abi;
@@ -749,9 +821,24 @@ export const CONTRACT_REGISTRY: ContractEntry[] = [
     abi: XCM_EXECUTOR_ABI,
   },
   {
+    name: "XcmPrecompile",
+    address: ADDRESSES.XcmPrecompile,
+    abi: XCM_PRECOMPILE_ABI,
+  },
+  {
     name: "HyperExecutor",
     address: ADDRESSES.HyperExecutor,
     abi: HYPER_EXECUTOR_ABI,
+  },
+  {
+    name: "IsmpHost",
+    address: ADDRESSES.IsmpHost,
+    abi: ISMP_HOST_ABI,
+  },
+  {
+    name: "XcmPrecompile",
+    address: ADDRESSES.XcmPrecompile,
+    abi: XCM_PRECOMPILE_ABI,
   },
   {
     name: "SwapRouter",

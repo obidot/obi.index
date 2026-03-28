@@ -28,6 +28,7 @@ type MockUpsert = ReturnType<typeof vi.fn>;
 type MockUpdateMany = ReturnType<typeof vi.fn>;
 
 interface MockPrisma {
+  $transaction: ReturnType<typeof vi.fn>;
   deposit: { createMany: MockCreateMany };
   withdrawal: { createMany: MockCreateMany };
   vaultState: { upsert: MockUpsert };
@@ -40,6 +41,7 @@ interface MockPrisma {
   oracleUpdate: { createMany: MockCreateMany };
   oracleState: { upsert: MockUpsert; updateMany: MockUpdateMany };
   swapExecution: { createMany: MockCreateMany };
+  priceHistoryPoint: { createMany: MockCreateMany };
 }
 
 function makeMockPrisma(): MockPrisma {
@@ -47,6 +49,9 @@ function makeMockPrisma(): MockPrisma {
   const upsert = () => vi.fn().mockResolvedValue({});
   const updateMany = () => vi.fn().mockResolvedValue({ count: 1 });
   return {
+    $transaction: vi.fn().mockImplementation(async (operations: unknown[]) => {
+      return Promise.all(operations);
+    }),
     deposit: { createMany: createMany() },
     withdrawal: { createMany: createMany() },
     vaultState: { upsert: upsert() },
@@ -59,6 +64,7 @@ function makeMockPrisma(): MockPrisma {
     oracleUpdate: { createMany: createMany() },
     oracleState: { upsert: upsert(), updateMany: updateMany() },
     swapExecution: { createMany: createMany() },
+    priceHistoryPoint: { createMany: createMany() },
   };
 }
 
@@ -319,6 +325,7 @@ describe("handleRouterEvent — Swapped", () => {
     expect(call.data[0].amountOut).toBe("990");
     expect(call.data[0].poolType).toBe("HydrationOmnipool");
     expect(call.data[0].recipient).toBe("0xSENDER");
+    expect(prisma.priceHistoryPoint.createMany).toHaveBeenCalledOnce();
   });
 
   it("uses unknown(N) label for unrecognised pool types", async () => {

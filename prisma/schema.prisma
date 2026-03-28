@@ -1,5 +1,5 @@
 // ── Obidot Indexer — Prisma Schema ───────────────────────
-// 20 models: 5 state, 13 historical, 2 infrastructure
+// 21 models: 5 state, 14 historical, 2 infrastructure
 
 generator client {
   provider = "prisma-client-js"
@@ -247,6 +247,25 @@ model SwapExecution {
   @@unique([txHash, logIndex])
   @@index([blockNumber])
   @@map("swap_executions")
+}
+
+/// Pair-keyed swap samples for indexed price history queries
+model PriceHistoryPoint {
+  id          String   @id @default(cuid())
+  pairId      String
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  tokenIn     String
+  tokenOut    String
+  amountIn    String
+  amountOut   String
+
+  @@unique([txHash, logIndex])
+  @@index([pairId, timestamp])
+  @@index([blockNumber])
+  @@map("price_history_points")
 }
 
 /// Cross-chain message dispatched (via ISMP / Hyperbridge)

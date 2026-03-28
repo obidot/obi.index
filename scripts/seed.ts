@@ -32,6 +32,8 @@ const HANDLER_MAP: Record<string, EventHandler> = {
   OracleRegistry: handleOracleEvent,
   SwapRouter: handleRouterEvent,
   CrossChainRouter: handleCrossChainEvent,
+  IsmpHost: handleCrossChainEvent,
+  XcmPrecompile: handleCrossChainEvent,
   BifrostAdapter: handleBifrostEvent,
   XCMExecutor: handleExecutorEvent,
   HyperExecutor: handleExecutorEvent,

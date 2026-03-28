@@ -11,9 +11,13 @@ import { WebSocketServer } from "ws";
 import { useServer } from "graphql-ws/use/ws";
 import express from "express";
 import { PrismaClient } from "@prisma/client";
+import { registerAnalyticsRoutes } from "./api/analytics.js";
+import { AnalyticsMaterializer } from "./analytics/materialized.js";
 import { typeDefs } from "./graphql/typeDefs.js";
 import { resolvers } from "./graphql/resolvers.js";
+import { registerHealthRoute } from "./api/health.js";
 import { Poller } from "./sync/poller.js";
+import { registerMetricsRoute } from "./metrics/prometheus.js";
 import { GRAPHQL_PORT } from "./config/constants.js";
 import { logger } from "./utils/logger.js";
 
@@ -25,6 +29,11 @@ async function main(): Promise<void> {
 
   // ── Schema ────────────────────────────────────────────
   const schema = makeExecutableSchema({ typeDefs, resolvers });
+
+  // ── Shared Services ───────────────────────────────────
+  const poller = new Poller(prisma);
+  const analyticsMaterializer = new AnalyticsMaterializer(prisma);
+  await analyticsMaterializer.start();
 
   // ── HTTP + WebSocket Server ───────────────────────────
   const app = express();
@@ -67,6 +76,10 @@ async function main(): Promise<void> {
 
   await server.start();
 
+  registerMetricsRoute(app);
+  registerHealthRoute(app, { prisma, poller });
+  registerAnalyticsRoutes(app, { materializer: analyticsMaterializer });
+
   app.use(
     "/graphql",
     express.json(),
@@ -94,13 +107,13 @@ async function main(): Promise<void> {
   );
 
   // ── Sync Poller ──────────────────────────────────────
-  const poller = new Poller(prisma);
   poller.start();
 
   // ── Graceful Shutdown ────────────────────────────────
   const shutdown = async (): Promise<void> => {
     logger.info("Shutting down...");
     poller.stop();
+    analyticsMaterializer.stop();
     await server.stop();
     await prisma.$disconnect();
     process.exit(0);

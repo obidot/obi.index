@@ -156,6 +156,7 @@ export const typeDefs = `#graphql
   type CrossChainDispatch {
     id: String!
     txHash: String!
+    logIndex: Int!
     blockNumber: Int!
     timestamp: String!
     messageType: String!
@@ -165,6 +166,19 @@ export const typeDefs = `#graphql
     data: String!
     commitment: String
     status: String!
+  }
+
+  type CrossChainPipeline {
+    intentId: String!
+    txHash: String!
+    commitment: String
+    sender: String!
+    sourceChain: String!
+    destChain: String!
+    latestStatus: String!
+    latestMessageType: String!
+    lastUpdatedAt: String!
+    steps: [CrossChainDispatch!]!
   }
 
   type BifrostStrategy {
@@ -195,6 +209,59 @@ export const typeDefs = `#graphql
     symbol: String!
     name: String!
     decimals: Int!
+  }
+
+  type PriceHistoryBar {
+    timestamp: Int!
+    open: String!
+    high: String!
+    low: String!
+    close: String!
+    volumeIn: String!
+    volumeOut: String!
+    trades: Int!
+  }
+
+  type ProtocolStats {
+    volume24h: String!
+    feeRevenue24h: String!
+    uniqueTraders7d: Int!
+    tvl: String!
+    totalSwaps: Int!
+    activeAdapters: Int!
+    pricedSwapCoverage24h: Int!
+    estimationNote: String!
+  }
+
+  type RouteStats {
+    routeKey: String!
+    label: String!
+    tokenIn: String!
+    tokenInSymbol: String!
+    tokenOut: String!
+    tokenOutSymbol: String!
+    poolType: String!
+    hops: Int!
+    swapCount: Int!
+    amountInTotal: String!
+    amountOutTotal: String!
+    estimatedVolumeUsd: String!
+    priced: Boolean!
+    lastSwapAt: String!
+  }
+
+  type PoolAnalytics {
+    pair: String!
+    window: String!
+    volumeIn: String!
+    volumeOut: String!
+    estimatedVolumeUsd: String!
+    estimatedFeesUsd: String!
+    tradeCount: Int!
+    pricedTrades: Int!
+    priceHigh: String!
+    priceLow: String!
+    lastPrice: String
   }
 
   # ═══════════════════════════════════════════════════════
@@ -278,7 +345,9 @@ export const typeDefs = `#graphql
     intentExecutions(limit: Int, offset: Int, solver: String): [IntentExecution!]!
     oracleUpdates(limit: Int, offset: Int, feed: String): [OracleUpdate!]!
     swapExecutions(limit: Int, offset: Int): [SwapExecution!]!
-    crossChainDispatches(limit: Int, offset: Int, status: String): [CrossChainDispatch!]!
+    crossChainDispatches(limit: Int, offset: Int, status: String, sender: String, txHash: String, commitment: String, messageType: String): [CrossChainDispatch!]!
+    crossChainPipeline(intentId: String!): CrossChainPipeline
+    crossChainPipelines(limit: Int, sender: String, status: String): [CrossChainPipeline!]!
     bifrostStrategies(limit: Int, offset: Int): [BifrostStrategy!]!
 
     # Aggregates
@@ -288,6 +357,12 @@ export const typeDefs = `#graphql
     # Infrastructure
     syncCursors: [SyncCursor!]!
     tokens: [Token!]!
+
+    # Analytics
+    protocolStats: ProtocolStats!
+    topRoutes(limit: Int): [RouteStats!]!
+    poolAnalytics(pair: String!, window: String!): PoolAnalytics!
+    priceHistory(tokenIn: String!, tokenOut: String!, from: Int!, to: Int!): [PriceHistoryBar!]!
 
     # LP
     lpPools: [LpPoolState!]!
@@ -318,6 +393,9 @@ export const typeDefs = `#graphql
 
     """Fires whenever a SwapRouter Swapped event is indexed."""
     swapExecuted: SwapExecution!
+
+    """Fires whenever an indexed cross-chain pipeline advances."""
+    crossChainStatus(txHash: String!): CrossChainPipeline!
 
     """Fires whenever a new LP Mint event is indexed."""
     lpMint: LpMint!

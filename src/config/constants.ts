@@ -40,6 +40,10 @@ export const STATE_REFRESH_INTERVAL_MS = Number(
   process.env.STATE_REFRESH_INTERVAL_MS ?? 30_000,
 );
 
+export const ANALYTICS_REFRESH_INTERVAL_MS = Number(
+  process.env.ANALYTICS_REFRESH_INTERVAL_MS ?? 300_000,
+);
+
 export const START_BLOCK = Number(process.env.START_BLOCK ?? 0);
 
 export const LOG_LEVEL = process.env.LOG_LEVEL ?? "info";
